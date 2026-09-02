@@ -7,6 +7,8 @@ paths a stubbed spreadsheet cannot reach cleanly.
 
 from __future__ import annotations
 
+from datetime import date
+
 from app.integrations.repositories import (
     ClaimLookupResult,
     CustomerLookupResult,
@@ -20,16 +22,20 @@ from app.models.enums import ClaimStatus
 MARIA = Customer(customer_id="CUST-1001", full_name="Maria Alvarez", phone_number="+15550101234")
 JAMES = Customer(customer_id="CUST-1002", full_name="James Okonkwo", phone_number="+15550102345")
 
+# Mirrors scripts/seed_data/claims.csv, dates included — otherwise the
+# "it was last updated on..." sentence is never exercised end to end.
 MARIA_CLAIM = Claim(
     claim_id="CLM-88401",
     customer_id="CUST-1001",
     status=ClaimStatus.UNDER_REVIEW,
+    last_updated=date(2026, 8, 28),
 )
 JAMES_CLAIM = Claim(
     claim_id="CLM-88402",
     customer_id="CUST-1002",
     status=ClaimStatus.DOCUMENTS_REQUIRED,
     required_documents=("Police report", "Repair estimate"),
+    last_updated=date(2026, 8, 30),
 )
 
 VERIFICATION_VALUES = {"CUST-1001": "1985-04-12", "CUST-1002": "1979-11-30"}

@@ -1,7 +1,7 @@
 ---
 id: document_submission
 topic: Sending documents in
-keywords: document, documents, upload, uploading, email, emailing, attach, attachment, photo, photos, picture, pictures, paperwork, evidence, receipt, receipts, proof, scan, scanned, forms, form
+keywords: document, documents, upload, uploading, send, sending, submit, submitting, return, returning, email, emailing, attach, attachment, photo, photos, picture, pictures, paperwork, evidence, receipt, receipts, proof, scan, scanned, forms, form
 ---
 
 > ⚠️ **DEMO CONTENT — NOT REAL COMPANY POLICY.**

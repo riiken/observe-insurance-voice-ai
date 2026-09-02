@@ -53,6 +53,19 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 9
+
+**Scenario tests read as transcripts.** They drive the real webhook and assert
+on what a caller would hear, so the mandatory scenarios can be checked against
+CLAUDE.md by someone who has not read the implementation. That is worth more
+here than a faster unit test, because the requirement is about the conversation,
+not the components.
+
+**Integration bugs got fixed at their own layer**, not patched where they
+surfaced: a stale outcome in the session model, a missing keyword in content, a
+claim reference in the tool that already had session access. None of them
+needed a change to working business logic.
+
 ## Decisions taken in Phase 8
 
 **The summary is derived from state, not written by a model.** CLAUDE.md §17

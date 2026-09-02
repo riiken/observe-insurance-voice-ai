@@ -111,11 +111,22 @@ class SessionState:
         return self._evolve(caller_phone=phone, lookup_attempts=self.lookup_attempts + 1)
 
     def with_customer_found(self, customer: Customer) -> SessionState:
-        """A record matched. Identity is claimed, not yet proven."""
+        """A record matched. Identity is claimed, not yet proven.
+
+        Clears an earlier CUSTOMER_NOT_FOUND outcome: a caller who mistyped
+        their number and then corrected it did not fail to be found, and the
+        post-call record should describe how the call ended rather than how it
+        started.
+        """
         return self._evolve(
             customer_id=customer.customer_id,
             customer_name=customer.full_name,
             authentication_status=AuthenticationStatus.CUSTOMER_FOUND,
+            conversation_outcome=(
+                None
+                if self.conversation_outcome is ConversationOutcome.CUSTOMER_NOT_FOUND
+                else self.conversation_outcome
+            ),
         )
 
     def with_customer_not_found(self) -> SessionState:

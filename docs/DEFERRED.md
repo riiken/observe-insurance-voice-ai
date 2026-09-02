@@ -39,7 +39,7 @@ was not deferred — it was missed.
 | 4.1 | **Multiple claims are still collapsed to the most recent.** `get_claim_status` answers about one claim. | Unchanged from 2.4: "which of your three claims?" is a conversation-design problem. The tool would need a disambiguation turn, which belongs with the agent. | Phase 5, if scoped |
 | 4.2 | **Guidance is loaded once at startup.** Editing `claim_guidance.json` needs a restart. | A reload endpoint is more surface than a take-home needs, and a restart is a deploy. Worth adding only if the claims team edits content live. | Not scoped |
 | 4.3 | **The voice layer is English-only, with hard-coded connective wording.** Statuses and next steps are configurable; the sentences joining them are not. | Externalising sentence templates buys nothing until there is a second language or a brand-voice review. The configured content already covers everything factual. | Not scoped |
-| 4.4 | **`render_submission_instructions` and `render_mailing_address` are still not wired to a tool.** The `document_submission` FAQ entry now covers the same ground, so a caller who asks does get an answer — via `search_faq` rather than as a claim follow-up. | The duplication is small and the FAQ path is well tested. Folding them together needs a decision about whether submission detail belongs to the claim or to the FAQ, which is not worth making under a deadline. | When the duplication bites |
+| 4.4 | ~~Submission instructions unreachable~~ — **partly closed in Phase 9**: the caller is now told their claim number when they ask how to send documents. `render_mailing_address` is still uncalled. **`render_submission_instructions` and `render_mailing_address` are still not wired to a tool.** The `document_submission` FAQ entry now covers the same ground, so a caller who asks does get an answer — via `search_faq` rather than as a claim follow-up. | The duplication is small and the FAQ path is well tested. Folding them together needs a decision about whether submission detail belongs to the claim or to the FAQ, which is not worth making under a deadline. | When the duplication bites |
 
 ### From Phase 5 — voice platform integration
 
@@ -79,6 +79,14 @@ was not deferred — it was missed.
 | 8.3 | **A permanently failed write is lost.** Bounded retries run inside the client; when they are exhausted the record exists only in the logs. | A durable outbox is the correct answer and is real infrastructure — a queue, a retry worker, and its own failure modes. The record *is* logged in full, so nothing is unrecoverable; it is just not automatic. | Before production |
 | 8.4 | **Sentiment is outcome-derived, not tone analysis.** A caller who got what they wanted while being furious about it is recorded POSITIVE. | Deliberate, not an oversight: we never see the audio, and inferring mood from a transcript would be a guess presented as data. Real sentiment needs a model call and would make the record non-deterministic. Documented in the README so nobody over-reads the column. | Only with a measured need |
 | 8.5 | **The service account key is passed as a JSON environment variable.** | Correct for a container platform's secret store, which is how this would deploy. A secrets manager integration is deployment work, not application work. | Deployment |
+
+### From Phase 9 — end-to-end integration
+
+| # | Item | Why deferred | Lands in |
+| - | ---- | ------------ | -------- |
+| 9.1 | **The post-call summary names the claim but not its status.** "Claim CLM-88401 was discussed" rather than "…, under review". | The session records `claim_id` but not the status, so this needs a new field carried for the sake of one sentence. Genuinely useful for reporting, and not worth changing working state-management mid-verification. | Small follow-up |
+| 9.2 | **A documents-required call is filed as RESOLVED.** The *call* was resolved — the caller got a clear answer — but the *claim* is still outstanding. | `ConversationOutcome` describes the call, which is the right meaning for an interaction log. Anyone wanting claim state should read the claims sheet. Worth revisiting only if the column gets misread in practice. | Only if misread |
+| 9.3 | **The structured tool payloads never reach the model.** Vapi tool results are strings, so the agent gets `speech`; `data` is used internally and for tests. | Returning JSON risks the model reading it aloud, which §16 forbids. Everything the caller needs is in the spoken line, and scenario 5 confirms the follow-up path works. | Not scoped |
 
 ---
 

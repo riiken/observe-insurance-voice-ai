@@ -7,9 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 8 complete — both integrations, end to end.**
-> A caller can hold a whole conversation, and every completed call is filed to
-> an external interaction log. All four mandatory demo scenarios work.
+> **Status: Phase 9 complete — verified end to end.**
+> All eight required scenarios are covered by whole-call tests that drive the
+> real webhook. Every requirement in CLAUDE.md is checked off, with evidence, in
+> [docs/REQUIREMENTS-CHECKLIST.md](docs/REQUIREMENTS-CHECKLIST.md).
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -182,6 +183,7 @@ observe-insurance-voice-ai/
 │   ├── architecture.md
 │   ├── google-sheets-setup.md   # sheet schema + setup
 │   ├── vapi-setup.md            # configuring the voice assistant
+│   ├── REQUIREMENTS-CHECKLIST.md # every CLAUDE.md requirement, with evidence
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
 │   ├── claim_guidance.json      # next steps + submission instructions
@@ -677,13 +679,48 @@ Setup: [docs/google-sheets-setup.md](docs/google-sheets-setup.md#integration-2--
 
 ---
 
+## End-to-end scenarios
+
+Eight whole calls, each driven through the **real HTTP webhook** — real payload
+parsing, real tool dispatch, real services — with only the two Google Sheets
+faked at the repository boundary. They read as transcripts on purpose, so
+someone holding CLAUDE.md can check the behaviour without reading the code:
+
+```
+CALLER  "My number is 555 010 1234"
+AGENT   Thanks, Maria. To confirm it's you, could you tell me your date of birth?
+CALLER  "Twelfth of April, 1985"
+AGENT   Thank you, Maria, you're verified. How can I help with your claim?
+CALLER  "What's happening with my claim?"
+AGENT   Your claim is currently under review. It was last updated on August the
+        28th. There's nothing you need to do while that's happening.
+
+── FILED: Maria Alvarez | POSITIVE | RESOLVED | auth=True claim=CLM-88401
+   "Caller verified as Maria Alvarez. Claim CLM-88401 was discussed. Call completed."
+```
+
+| Scenario | Covers |
+| -------- | ------ |
+| 1 Happy path | lookup → verify → claim → completion → post-call record |
+| 2 Authentication failure | three attempts, no claim data at any point, representative offered |
+| 3 Customer not found | distinct from failure, retry works, representative offered |
+| 4 Representative escalation | any point, no workflow first, structured record |
+| 5 Documents required | documents named, submission instructions, claim number supplied |
+| 6 FAQ | all four required topics, no verification needed |
+| 7 Unsupported question | safe fallback, nothing invented |
+| 8 Emergency | 911 guidance, claims workflow stopped, does not unlock the claim |
+
+See [`test_end_to_end_scenarios.py`](backend/tests/test_end_to_end_scenarios.py).
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-681 tests, all deterministic and offline — no Google credentials, no network.
+718 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so

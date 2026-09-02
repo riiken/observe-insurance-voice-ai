@@ -15,7 +15,7 @@ from app.core.logging import event, get_logger
 from app.schemas.faq import FaqAnswerView
 from app.services.faq import Confidence, FaqOutcome, FaqService
 from app.services.session_store import SessionStore
-from app.services.voice import speak_list
+from app.services.voice import speak_list, speak_reference
 from app.tools.base import ToolOutcome, ToolResult
 
 log = get_logger(__name__)
@@ -25,6 +25,9 @@ SearchFaqToolResult = ToolResult[FaqAnswerView]
 # Spoken when a match is real but thin. The answer is still the configured one —
 # only the framing changes, so the caller can tell us we have missed the point.
 _HEDGE_PREFIX = "I think this is what you're after. "
+
+# The one entry whose answer instructs the caller to quote a claim number.
+_SUBMISSION_ENTRY_ID = "document_submission"
 
 
 class SearchFaqTool:
@@ -71,6 +74,8 @@ class SearchFaqTool:
         if result.confidence is Confidence.MEDIUM:
             speech = f"{_HEDGE_PREFIX}{speech}"
 
+        speech += await self._claim_reference(call_id, entry.id)
+
         return ToolResult(
             outcome=ToolOutcome.SUCCESS,
             speech=speech,
@@ -91,6 +96,27 @@ class SearchFaqTool:
         session = await self._sessions.get(call_id)
         if session is not None:
             await self._sessions.save(session.with_faq_topic(topic))
+
+    async def _claim_reference(self, call_id: str, entry_id: str) -> str:
+        """Supply the claim number the submission answer tells them to quote.
+
+        The configured answer says to include a claim number on every page.
+        Telling a caller that without telling them the number is an instruction
+        they cannot follow — so if this session has already been given a claim,
+        it is read back, spaced so they can write it down.
+
+        Only for the submission topic, and only for a verified session that
+        actually retrieved a claim: this must never disclose a claim reference
+        to someone who has not earned one.
+        """
+        if entry_id != _SUBMISSION_ENTRY_ID or self._sessions is None or not call_id:
+            return ""
+
+        session = await self._sessions.get(call_id)
+        if session is None or not session.is_authenticated or not session.claim_id:
+            return ""
+
+        return f" Your claim number is {speak_reference(session.claim_id)}."
 
     def _no_answer(self, call_id: str, *, reason: str, score: float = 0.0) -> SearchFaqToolResult:
         """Say what we can help with, then offer a person. Never guess.
