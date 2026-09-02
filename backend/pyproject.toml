@@ -12,6 +12,11 @@ dependencies = [
     # plain REST rather than google-api-python-client: one dependency instead of
     # a discovery-document stack, and it keeps the transport mockable.
     "httpx>=0.27",
+    # Service-account signing for Google Sheets *writes*. An API key can only
+    # read, so Integration #2 needs one. Used for the JWT assertion only — the
+    # token exchange and every API call go over our own httpx client, which
+    # keeps the transport mockable and avoids pulling in `requests`.
+    "google-auth>=2.30",
 ]
 
 [project.optional-dependencies]

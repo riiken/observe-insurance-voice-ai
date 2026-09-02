@@ -57,6 +57,9 @@ class SessionState:
     lookup_attempts: int = 0
 
     claim_id: str | None = None
+    # FAQ topics actually answered, in order. Recorded so the post-call summary
+    # can say what the call was about without inferring it from a transcript.
+    faq_topics: tuple[str, ...] = ()
 
     escalated: bool = False
     escalation_reason: str | None = None
@@ -165,6 +168,12 @@ class SessionState:
 
     def with_claim(self, claim_id: str) -> SessionState:
         return self._evolve(claim_id=claim_id)
+
+    def with_faq_topic(self, topic: str) -> SessionState:
+        """Note a topic we actually answered. Repeats are not recorded twice."""
+        if not topic or topic in self.faq_topics:
+            return self
+        return self._evolve(faq_topics=(*self.faq_topics, topic))
 
     def with_escalation(self, reason: str) -> SessionState:
         return self._evolve(

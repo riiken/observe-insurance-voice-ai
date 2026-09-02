@@ -18,7 +18,9 @@ from app.core.context import reset_call_id, set_call_id
 from app.core.logging import event, get_logger
 from app.integrations.voice_platform import VoiceEvent, VoiceEventType
 from app.models.enums import AuthenticationStatus, ConversationOutcome
+from app.models.session import SessionState
 from app.services.authentication import AuthenticationService
+from app.services.postcall import PostCallService
 from app.services.session_store import SessionStore
 from app.tools.registry import ToolRegistry
 
@@ -47,10 +49,12 @@ class ConversationService:
         authentication: AuthenticationService,
         sessions: SessionStore,
         tools: ToolRegistry,
+        postcall: PostCallService,
     ) -> None:
         self._authentication = authentication
         self._sessions = sessions
         self._tools = tools
+        self._postcall = postcall
 
     async def handle(self, voice_event: VoiceEvent) -> ConversationResponse:
         """Process one webhook event."""
@@ -117,15 +121,14 @@ class ConversationService:
 
         The outcome is derived from session state, not from the model's summary:
         whether a caller was authenticated or escalated is something we know,
-        and it should not depend on how a transcript was worded. Persisting an
-        interaction record is Integration #2 (see docs/DEFERRED.md).
+        and it should not depend on how a transcript was worded.
         """
         session = await self._sessions.get(voice_event.call_id)
         if session is None:
             log.info("call.completed", extra=event(outcome="UNKNOWN_SESSION"))
             return
 
-        outcome = _derive_outcome(session.authentication_status, session.escalated)
+        outcome = _derive_outcome(session)
         session = await self._authentication.complete(voice_event.call_id, outcome)
 
         log.info(
@@ -138,16 +141,33 @@ class ConversationService:
             ),
         )
 
+        # Integration #2. `record_call` never raises, but the call is wrapped
+        # anyway: nothing about filing paperwork may fail a webhook.
+        try:
+            await self._postcall.record_call(session)
+        except Exception:  # pragma: no cover - defence in depth
+            log.exception("postcall.failed", extra=event(call_id=voice_event.call_id))
+
         # Freeing the session here is what keeps the in-memory store bounded.
         await self._sessions.discard(voice_event.call_id)
 
 
-def _derive_outcome(status: AuthenticationStatus, escalated: bool) -> ConversationOutcome:
-    """How the call ended, from what we observed rather than what was said."""
-    if escalated:
+def _derive_outcome(session: SessionState) -> ConversationOutcome:
+    """How the call ended, from what we observed rather than what was said.
+
+    An outcome already recorded during the call — "no account matched that
+    number" — is more specific than anything derivable at the end, so it is
+    kept rather than flattened to ABANDONED.
+    """
+    if session.escalated:
         return ConversationOutcome.ESCALATED
+
+    status = session.authentication_status
     if status is AuthenticationStatus.AUTHENTICATED:
         return ConversationOutcome.RESOLVED
     if status is AuthenticationStatus.AUTHENTICATION_FAILED:
         return ConversationOutcome.AUTHENTICATION_FAILED
+    if session.conversation_outcome is ConversationOutcome.CUSTOMER_NOT_FOUND:
+        return ConversationOutcome.CUSTOMER_NOT_FOUND
+
     return ConversationOutcome.ABANDONED

@@ -11,6 +11,7 @@ from collections.abc import Callable, Sequence
 
 import httpx
 
+from app.integrations.sheets.auth import ApiKeyAuthorizer
 from app.integrations.sheets.claims import GoogleSheetsClaimsRepository
 from app.integrations.sheets.client import GoogleSheetsClient
 from app.integrations.sheets.customers import GoogleSheetsCustomerRepository
@@ -57,7 +58,7 @@ def make_client(
     """A client whose socket is a callable. Retries default off for clarity."""
     return GoogleSheetsClient(
         spreadsheet_id="sheet-under-test",
-        api_key="test-key",
+        authorizer=ApiKeyAuthorizer("test-key"),
         max_retries=max_retries,
         backoff_base_seconds=backoff_base_seconds,
         transport=httpx.MockTransport(handler),

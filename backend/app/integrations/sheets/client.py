@@ -21,6 +21,7 @@ import httpx
 from app.core.errors import IntegrationError, IntegrationTimeoutError
 from app.core.logging import event, get_logger
 from app.core.retry import retry_async
+from app.integrations.sheets.auth import SheetsAuthorizer
 
 INTEGRATION_NAME = "google-sheets"
 
@@ -45,7 +46,7 @@ class GoogleSheetsClient:
         self,
         *,
         spreadsheet_id: str,
-        api_key: str,
+        authorizer: SheetsAuthorizer,
         base_url: str = "https://sheets.googleapis.com/v4/spreadsheets",
         timeout_seconds: float = 10.0,
         max_retries: int = 2,
@@ -53,7 +54,7 @@ class GoogleSheetsClient:
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._spreadsheet_id = spreadsheet_id
-        self._api_key = api_key
+        self._authorizer = authorizer
         self._max_retries = max_retries
         self._backoff_base_seconds = backoff_base_seconds
         self._client = httpx.AsyncClient(
@@ -90,11 +91,106 @@ class GoogleSheetsClient:
         )
         return rows
 
+    async def append_values(self, cell_range: str, rows: list[list[str]]) -> int:
+        """Append rows to the end of `cell_range`. Returns the rows written.
+
+        Requires a service account: an API key cannot write. Raises
+        `IntegrationError` on failure — callers decide whether that is worth
+        retrying above the client's own bounded retry.
+        """
+        if not rows:
+            return 0
+
+        started = time.perf_counter()
+
+        written = await retry_async(
+            lambda: self._append(cell_range, rows),
+            max_retries=self._max_retries,
+            backoff_base_seconds=self._backoff_base_seconds,
+            is_transient=_is_transient,
+            operation_name="sheets.append_values",
+        )
+
+        log.info(
+            "sheets.append",
+            extra=event(
+                range=cell_range,
+                rows=written,
+                duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                success=True,
+            ),
+        )
+        return written
+
+    async def _append(self, cell_range: str, rows: list[list[str]]) -> int:
+        headers, params = await self._authorizer.credentials()
+
+        try:
+            response = await self._client.post(
+                f"/{self._spreadsheet_id}/values/{cell_range}:append",
+                headers=headers,
+                params={
+                    **params,
+                    # RAW: a value that looks like a formula must be stored as
+                    # text, not evaluated. Interaction records are data.
+                    "valueInputOption": "RAW",
+                    "insertDataOption": "INSERT_ROWS",
+                },
+                json={"values": rows},
+            )
+        except httpx.TimeoutException as exc:
+            raise IntegrationTimeoutError(integration=INTEGRATION_NAME, range=cell_range) from exc
+        except httpx.HTTPError as exc:
+            raise IntegrationError(
+                integration=INTEGRATION_NAME,
+                range=cell_range,
+                cause=type(exc).__name__,
+                retryable=True,
+            ) from exc
+
+        if response.status_code != httpx.codes.OK:
+            raise IntegrationError(
+                integration=INTEGRATION_NAME,
+                range=cell_range,
+                status_code=response.status_code,
+                retryable=response.status_code in _RETRYABLE_STATUS,
+            )
+
+        return self._parse_append_body(response, cell_range, len(rows))
+
+    @staticmethod
+    def _parse_append_body(response: httpx.Response, cell_range: str, requested: int) -> int:
+        """A 200 we cannot read is a failure: we must not report a write we
+        cannot confirm, or the record is silently lost."""
+        try:
+            payload: Any = response.json()
+        except ValueError as exc:
+            raise IntegrationError(
+                integration=INTEGRATION_NAME, range=cell_range, cause="invalid_json"
+            ) from exc
+
+        if not isinstance(payload, dict):
+            raise IntegrationError(
+                integration=INTEGRATION_NAME, range=cell_range, cause="unexpected_payload"
+            )
+
+        updates = payload.get("updates")
+        if not isinstance(updates, dict):
+            raise IntegrationError(
+                integration=INTEGRATION_NAME, range=cell_range, cause="missing_updates"
+            )
+
+        updated = updates.get("updatedRows")
+        return int(updated) if isinstance(updated, (int, float)) else requested
+
     async def _fetch(self, cell_range: str) -> list[list[str]]:
+        headers, params = await self._authorizer.credentials()
+
         try:
             response = await self._client.get(
                 f"/{self._spreadsheet_id}/values/{cell_range}",
-                params={"key": self._api_key, "majorDimension": "ROWS"},
+                headers=headers,
+                params={**params, "majorDimension": "ROWS"},
             )
         except httpx.TimeoutException as exc:
             raise IntegrationTimeoutError(integration=INTEGRATION_NAME, range=cell_range) from exc
@@ -144,3 +240,6 @@ class GoogleSheetsClient:
 
     async def aclose(self) -> None:
         await self._client.aclose()
+        closer = getattr(self._authorizer, "aclose", None)
+        if closer is not None:
+            await closer()

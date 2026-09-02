@@ -7,10 +7,9 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 7 complete — escalation and safety handling.**
-> Escalation produces a structured record at any point in a call, and
-> emergencies are detected by the backend as well as by the agent. Still to
-> come: post-call interaction records (Integration #2).
+> **Status: Phase 8 complete — both integrations, end to end.**
+> A caller can hold a whole conversation, and every completed call is filed to
+> an external interaction log. All four mandatory demo scenarios work.
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -146,6 +145,8 @@ observe-insurance-voice-ai/
 │   │   │   ├── conversation.py  #   call lifecycle, provider-neutral
 │   │   │   ├── escalation.py    #   escalation records
 │   │   │   ├── faq.py           #   knowledge loading + scored retrieval
+│   │   │   ├── postcall.py      #   builds and files the interaction record
+│   │   │   ├── summary.py       #   summary + sentiment, from observed state
 │   │   │   ├── guidance.py      #   configured claim guidance loader
 │   │   │   ├── voice.py         #   structured data -> natural speech
 │   │   │   └── container.py     #   service assembly
@@ -155,6 +156,9 @@ observe-insurance-voice-ai/
 │   │   │   ├── repositories.py  #   CustomerRepository / ClaimsRepository contracts
 │   │   │   ├── factory.py       #   builds Integration #1 from settings
 │   │   │   ├── voice_platform.py#   ALL Vapi-specific code lives here
+│   │   │   └── sheets/
+│   │   │       ├── auth.py      #     API key (read) / service account (write)
+│   │   │       └── interactions.py #  Integration #2
 │   │   │   └── sheets/          #   Google Sheets adapters
 │   │   │       ├── client.py    #     REST transport; no domain knowledge
 │   │   │       ├── rows.py      #     row -> domain object, malformed-data policy
@@ -623,13 +627,63 @@ person — see [FAQ knowledge base](#faq-knowledge-base).
 
 ---
 
+## Integration #2 — post-call records
+
+Every completed call is filed as one row in a **separate** Google Sheet:
+
+```
+call_id · timestamp · caller_name · caller_phone · customer_id · claim_id
+authenticated · resolution · escalated · escalation_reason · sentiment · call_summary
+```
+
+Written with a **service account**, because an API key cannot write — which is
+also why it is a different spreadsheet. The write credential must not be able to
+edit customer records, and the service warns at startup if both ids match.
+
+### The summary is derived, not generated
+
+Both the summary and the sentiment come from **state we observed**, never from a
+transcript:
+
+| Call | Sentiment | Summary |
+| ---- | --------- | ------- |
+| Verified, claim discussed | `POSITIVE` | "Caller verified as Maria Alvarez. Asked about office hours. Claim CLM-88401 was discussed. Call completed." |
+| Three failed attempts | `NEGATIVE` | "Caller could not be verified after 3 attempts. Call ended without verification." |
+| Emergency | `NEGATIVE` | "Caller was not identified. An emergency was reported and the call was escalated immediately." |
+| Unknown number | `NEGATIVE` | "No account was found for the number the caller gave. Call ended without an account match." |
+
+Vapi sends its own model-written summary on `end-of-call-report`. It is
+deliberately unused: we cannot tell whether it describes something that actually
+happened, and CLAUDE.md §17 forbids inventing events. The cost is honest —
+these read plainer than a model would write, and **"sentiment" here means how
+the call went by outcome, not tone of voice**. We never see the audio, and a
+transcript-based judgement would be a guess dressed as a measurement.
+
+### Reliability
+
+- **`call_id` is the idempotency key.** Checked in-process *and* against the
+  sheet, so a redelivered webhook produces no second row — and idempotency
+  survives a restart.
+- **A row is only marked written once confirmed.** A 200 whose body we cannot
+  parse is a failure, not a success: claiming a write we cannot confirm would
+  silently lose the record.
+- **If the duplicate check fails, nothing is written.** Writing because we could
+  not read is the failure the check exists to prevent.
+- Timeouts, 429s and 5xx retry with jittered backoff; 4xx does not.
+- **Nothing here can affect a caller.** `PostCallService` never raises, and the
+  call site wraps it anyway. A failure to file paperwork costs a row, not a call.
+
+Setup: [docs/google-sheets-setup.md](docs/google-sheets-setup.md#integration-2--the-interaction-log).
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-632 tests, all deterministic and offline — no Google credentials, no network.
+681 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so
@@ -657,13 +711,10 @@ Phases 1–6 cover the foundation, both the data integration and the voice
 platform, the authentication boundary, claims support and the FAQ knowledge
 base. Deliberately **not** implemented yet:
 
-- Integration #2: post-call interaction records (caller name, summary,
-  sentiment, timestamp) written to an external system
-- Escalation records are held in memory rather than persisted
+- Escalation records are held in memory rather than persisted (the interaction
+  log records that a call *was* escalated, but not the escalation record itself)
 - Transfer is implemented but unverified against a live Vapi account — no
   destination exists to transfer to
-- Service-account auth for Sheets (an API key covers every read; writes will
-  need one)
 - A live phone call has not been placed — the webhook is exercised end to end
   over HTTP with real Vapi payload shapes, but the last hop is manual
 

@@ -1,7 +1,19 @@
-# Google Sheets setup (Integration #1)
+# Google Sheets setup
 
-Customer and claim records are read from a Google Sheet. This document is the
-sheet's schema and the setup steps.
+Two integrations, two spreadsheets:
+
+| | Integration #1 — customers & claims | Integration #2 — interaction log |
+| --- | --- | --- |
+| Direction | read | **write** |
+| Credential | API key | service account |
+| Sharing | anyone with the link (viewer) | shared with the service account only |
+| Sections | [1](#1-create-the-spreadsheet)–[6](#6-verify) below | [Integration #2](#integration-2--the-interaction-log) |
+
+**They are deliberately separate files.** The write credential must not be able
+to edit customer records — that is the whole reason for the split, and the
+service warns at startup if you point both at the same spreadsheet.
+
+## Integration #1 — customers and claims
 
 > **Use synthetic data only.** Read access here is via an API key, which requires
 > the sheet to be link-shared. Everything in `scripts/seed_data/` is invented.
@@ -100,6 +112,64 @@ liveness never depends on an upstream.
 Leaving both variables blank is supported: the service starts, `/ready` reports
 no dependencies, and the integration is simply absent. Unit tests never read
 these values.
+
+---
+
+## Integration #2 — the interaction log
+
+One row per completed call. Written with a service account, because an API key
+cannot write.
+
+### 1. Create the spreadsheet
+
+A **second, separate** spreadsheet with one tab named `Interactions`. Row 1 must
+be exactly these headers, in this order:
+
+```
+call_id | timestamp | caller_name | caller_phone | customer_id | claim_id |
+authenticated | resolution | escalated | escalation_reason | sentiment | call_summary
+```
+
+The service verifies this header on startup; `/ready` reports `interactions` as
+unhealthy if a column is missing.
+
+### 2. Create a service account
+
+1. <https://console.cloud.google.com/> → **IAM & Admin → Service Accounts →
+   Create**
+2. No project roles are needed — access is granted by sharing the sheet, not by
+   IAM.
+3. **Keys → Add key → JSON.** Download it.
+
+### 3. Share the sheet with it
+
+Copy the `client_email` from the JSON (`…@….iam.gserviceaccount.com`) and share
+the **Interactions spreadsheet only** with it as **Editor**.
+
+Do not share the customer spreadsheet with this account. It has write scope.
+
+### 4. Configure
+
+```bash
+GOOGLE_INTERACTIONS_SPREADSHEET_ID=1XyZ...
+GOOGLE_SERVICE_ACCOUNT_JSON={"type":"service_account","client_email":"...","private_key":"-----BEGIN PRIVATE KEY-----\n..."}
+```
+
+The JSON goes in as one line. Keep the `\n` escapes in `private_key` intact —
+it is a JSON string, so they are literal backslash-n, not newlines.
+
+Leave both blank and calls still complete: the record is built and written to
+the logs instead of the sheet, and `/ready` simply omits `interactions`.
+
+### 5. Verify
+
+Make a call, hang up, and check the sheet. You should see exactly one row.
+Hanging up twice, or a webhook redelivery, still produces one row — `call_id`
+is the idempotency key.
+
+```bash
+docker compose logs api | jq 'select(.event == "postcall.persisted")'
+```
 
 ---
 

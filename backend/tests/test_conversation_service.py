@@ -10,11 +10,13 @@ import pytest
 
 from app.integrations.voice_platform import VoiceEventType, parse_webhook
 from app.models.enums import AuthenticationStatus, ConversationOutcome
+from app.models.session import SessionState
 from app.services.container import ServiceContainer
 from app.services.conversation import _derive_outcome
 from app.tools.base import ToolOutcome, ToolResult
 from app.tools.registry import ToolDefinition, ToolRegistry
 from tests import voice_fixtures as vapi
+from tests.session_fixtures import MARIA
 from tests.voice_fixtures import CALL_ID, JAMES_DOB, JAMES_PHONE, MARIA_DOB, MARIA_PHONE
 
 
@@ -90,27 +92,44 @@ async def test_completion_records_the_outcome_and_releases_the_session(
 
 
 @pytest.mark.parametrize(
-    ("status", "escalated", "expected"),
+    ("session", "expected"),
     [
-        (AuthenticationStatus.UNAUTHENTICATED, False, ConversationOutcome.ABANDONED),
-        (AuthenticationStatus.CUSTOMER_FOUND, False, ConversationOutcome.ABANDONED),
-        (AuthenticationStatus.AUTHENTICATED, False, ConversationOutcome.RESOLVED),
+        (SessionState(call_id=CALL_ID), ConversationOutcome.ABANDONED),
+        (SessionState(call_id=CALL_ID).with_customer_found(MARIA), ConversationOutcome.ABANDONED),
         (
-            AuthenticationStatus.AUTHENTICATION_FAILED,
-            False,
-            ConversationOutcome.AUTHENTICATION_FAILED,
+            SessionState(call_id=CALL_ID).with_authenticated(MARIA),
+            ConversationOutcome.RESOLVED,
         ),
         # Escalation wins: a call handed to a human is escalated, whatever else
         # happened on the way there.
-        (AuthenticationStatus.AUTHENTICATED, True, ConversationOutcome.ESCALATED),
-        (AuthenticationStatus.UNAUTHENTICATED, True, ConversationOutcome.ESCALATED),
+        (
+            SessionState(call_id=CALL_ID).with_authenticated(MARIA).with_escalation("x"),
+            ConversationOutcome.ESCALATED,
+        ),
+        (
+            SessionState(call_id=CALL_ID).with_escalation("x"),
+            ConversationOutcome.ESCALATED,
+        ),
+        # An outcome recorded during the call survives completion.
+        (
+            SessionState(call_id=CALL_ID).with_customer_not_found(),
+            ConversationOutcome.CUSTOMER_NOT_FOUND,
+        ),
     ],
 )
 def test_the_outcome_is_derived_from_state_not_from_the_transcript(
-    status: AuthenticationStatus, escalated: bool, expected: ConversationOutcome
+    session: SessionState, expected: ConversationOutcome
 ) -> None:
     """What we observed, not how the model chose to summarise it."""
-    assert _derive_outcome(status, escalated) is expected
+    assert _derive_outcome(session) is expected
+
+
+def test_a_failed_verification_ends_as_authentication_failed() -> None:
+    session = SessionState(call_id=CALL_ID).with_customer_found(MARIA)
+    for _ in range(3):
+        session = session.with_verification_failed()
+
+    assert _derive_outcome(session) is ConversationOutcome.AUTHENTICATION_FAILED
 
 
 async def test_a_verified_call_ends_as_resolved(services: ServiceContainer) -> None:
@@ -120,9 +139,7 @@ async def test_a_verified_call_ends_as_resolved(services: ServiceContainer) -> N
 
     session = await services.sessions.get(CALL_ID)
     assert session is not None
-    assert _derive_outcome(session.authentication_status, session.escalated) is (
-        ConversationOutcome.RESOLVED
-    )
+    assert _derive_outcome(session) is ConversationOutcome.RESOLVED
 
 
 async def test_an_escalated_call_ends_as_escalated(services: ServiceContainer) -> None:
@@ -131,9 +148,7 @@ async def test_an_escalated_call_ends_as_escalated(services: ServiceContainer) -
 
     session = await services.sessions.get(CALL_ID)
     assert session is not None
-    assert _derive_outcome(session.authentication_status, session.escalated) is (
-        ConversationOutcome.ESCALATED
-    )
+    assert _derive_outcome(session) is ConversationOutcome.ESCALATED
 
 
 async def test_completion_of_an_unknown_call_is_harmless(

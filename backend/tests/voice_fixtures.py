@@ -21,14 +21,16 @@ JAMES_DOB = "1979-11-30"
 class FakeIntegration:
     """Stands in for `DataIntegration` with in-memory repositories."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, interactions: object | None = None) -> None:
         self.customers = FakeCustomerRepository()
         self.claims = FakeClaimsRepository()
+        # None models a deployment without Integration #2 configured.
+        self.interactions = interactions
 
 
-def build_container() -> ServiceContainer:
+def build_container(interactions: object | None = None) -> ServiceContainer:
     """A real container — real tools, real services, fake repositories."""
-    return build_services(FakeIntegration())  # type: ignore[arg-type]
+    return build_services(FakeIntegration(interactions=interactions))  # type: ignore[arg-type]
 
 
 # --- Vapi payload builders ----------------------------------------------------

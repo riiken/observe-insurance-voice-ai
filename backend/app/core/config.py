@@ -54,6 +54,17 @@ class Settings(BaseSettings):
     sheets_customers_range: str = "Customers!A:D"
     sheets_claims_range: str = "Claims!A:E"
 
+    # --- Google Sheets (Integration #2: post-call interaction records) ------
+    # A separate spreadsheet, written with a service account. An API key cannot
+    # write, and the write credential must not be able to edit customer data —
+    # so this is its own file with its own sharing.
+    google_interactions_spreadsheet_id: str | None = None
+    # The service account JSON key, as a single-line JSON string.
+    google_service_account_json: str | None = None
+    sheets_interactions_range: str = "Interactions!A:L"
+    # Override only to point at a stub during local testing.
+    google_token_endpoint: str = "https://oauth2.googleapis.com/token"
+
     # --- Knowledge ---------------------------------------------------------
     # Configured claim guidance. None resolves to knowledge/claim_guidance.json
     # at the repository root; override to point at a different content set.
@@ -110,6 +121,24 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment in ("staging", "prod")
+
+    @property
+    def interactions_configured(self) -> bool:
+        """Whether Integration #2 can write.
+
+        Both halves are required: a spreadsheet to write to, and a service
+        account to write with. Absent either, calls still complete and the
+        record is logged rather than filed.
+        """
+        return bool(self.google_interactions_spreadsheet_id and self.google_service_account_json)
+
+    @property
+    def interactions_share_the_customer_sheet(self) -> bool:
+        """True when the write credential would also reach customer data."""
+        return bool(
+            self.google_interactions_spreadsheet_id
+            and self.google_interactions_spreadsheet_id == self.google_sheets_spreadsheet_id
+        )
 
     @property
     def sheets_configured(self) -> bool:

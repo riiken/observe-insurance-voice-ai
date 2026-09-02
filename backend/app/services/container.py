@@ -18,6 +18,7 @@ from app.services.conversation import ConversationService
 from app.services.escalation import EscalationService
 from app.services.faq import FaqService, load_faq_entries
 from app.services.guidance import ClaimGuidance, load_claim_guidance
+from app.services.postcall import PostCallService
 from app.services.safety import SafetyService
 from app.services.session_store import InMemorySessionStore, SessionStore
 from app.tools.authentication_tools import LookupCustomerTool, VerifyIdentityTool
@@ -38,6 +39,7 @@ class ServiceContainer:
     escalation: EscalationService
     faq: FaqService
     safety: SafetyService
+    postcall: PostCallService
     conversation: ConversationService
     guidance: ClaimGuidance
     tools: ToolRegistry
@@ -77,6 +79,7 @@ def build_services(
     claims = ClaimsService(integration.claims, sessions)
     safety = SafetyService()
     escalation = EscalationService(sessions, transfer_available=supports_transfer(transfer_to))
+    postcall = PostCallService(integration.interactions)
 
     claim_status_tool = ClaimStatusTool(claims, guidance)
 
@@ -87,7 +90,7 @@ def build_services(
         lookup_customer=LookupCustomerTool(authentication),
         verify_identity=VerifyIdentityTool(authentication),
         get_claim_status=claim_status_tool,
-        search_faq=SearchFaqTool(faq),
+        search_faq=SearchFaqTool(faq, sessions),
         request_representative=RequestRepresentativeTool(
             escalation, safety, transfer_to=transfer_to
         ),
@@ -101,8 +104,12 @@ def build_services(
         escalation=escalation,
         faq=faq,
         safety=safety,
+        postcall=postcall,
         conversation=ConversationService(
-            authentication=authentication, sessions=sessions, tools=tools
+            authentication=authentication,
+            sessions=sessions,
+            tools=tools,
+            postcall=postcall,
         ),
         guidance=guidance,
         tools=tools,

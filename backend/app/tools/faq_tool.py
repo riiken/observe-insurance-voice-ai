@@ -14,6 +14,7 @@ from __future__ import annotations
 from app.core.logging import event, get_logger
 from app.schemas.faq import FaqAnswerView
 from app.services.faq import Confidence, FaqOutcome, FaqService
+from app.services.session_store import SessionStore
 from app.services.voice import speak_list
 from app.tools.base import ToolOutcome, ToolResult
 
@@ -31,8 +32,11 @@ class SearchFaqTool:
 
     name = "search_faq"
 
-    def __init__(self, faq: FaqService) -> None:
+    def __init__(self, faq: FaqService, sessions: SessionStore | None = None) -> None:
         self._faq = faq
+        # Optional: used only to note what the call was about, so the post-call
+        # summary can say so without inferring it from a transcript.
+        self._sessions = sessions
 
     async def __call__(self, call_id: str, question: str) -> SearchFaqToolResult:
         if not question or not question.strip():
@@ -61,6 +65,8 @@ class SearchFaqTool:
             is_demo_content=entry.is_demo_content,
         )
 
+        await self._note_topic(call_id, entry.topic)
+
         speech = entry.answer
         if result.confidence is Confidence.MEDIUM:
             speech = f"{_HEDGE_PREFIX}{speech}"
@@ -77,6 +83,14 @@ class SearchFaqTool:
                 "score": f"{result.score:.2f}",
             },
         )
+
+    async def _note_topic(self, call_id: str, topic: str) -> None:
+        """Record an answered topic on the session, best-effort."""
+        if self._sessions is None or not call_id:
+            return
+        session = await self._sessions.get(call_id)
+        if session is not None:
+            await self._sessions.save(session.with_faq_topic(topic))
 
     def _no_answer(self, call_id: str, *, reason: str, score: float = 0.0) -> SearchFaqToolResult:
         """Say what we can help with, then offer a person. Never guess.

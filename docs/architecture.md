@@ -17,8 +17,8 @@ Claims Support Agent      this service
   └── integrations/       repository contracts + adapters
         │
         ▼
-External Systems          Google Sheets: customer/claim records (Integration #1)
-                          interaction log (Integration #2, later)
+External Systems          Google Sheets: customer/claim records (Integration #1, read)
+                          Google Sheets: interaction log (Integration #2, write)
 ```
 
 The voice platform owns the voice experience. This service owns everything that
@@ -52,6 +52,40 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
+
+## Decisions taken in Phase 8
+
+**The summary is derived from state, not written by a model.** CLAUDE.md §17
+requires a summary of the actual interaction and forbids inventing events. A
+model reading a transcript can guarantee neither, and would make every record
+non-deterministic and untestable. Vapi sends its own summary; it is deliberately
+unused. The cost is plainer prose, and it is worth it — a row in a claims
+interaction log has to be trustworthy more than it has to be well written.
+
+**Sentiment is outcome-derived, and says so.** We never see the audio. Reading
+tone off a transcript would be a guess dressed as a measurement, so this scores
+what we observed: locked out, no account found, emergency — negative; verified
+and answered — positive. Less rich, considerably more defensible, and stated as
+such in the README so nobody reads more into a column than is there.
+
+**A second spreadsheet, not a second tab.** This is the only credential in the
+system with write scope. On a shared file it could edit customer records; on its
+own file the blast radius is the interaction log. `Settings` warns when both ids
+match rather than silently allowing it.
+
+**Idempotency is checked twice.** In-process, which catches the common retry
+without a round trip; and against the sheet, so it survives a restart. A record
+is marked written only after the append is confirmed, so a failed attempt is
+retried rather than mistaken for a duplicate.
+
+**An unconfirmable write is a failure.** A 200 whose body we cannot parse could
+mean anything; reporting success would silently lose the record. Equally, if the
+duplicate check cannot be read we do not write at all — writing because we could
+not read is exactly what the check exists to prevent.
+
+**Post-call processing cannot touch a caller.** `PostCallService` never raises,
+and the call site wraps it anyway. Failing to file paperwork costs a row, not a
+phone call.
 
 ## Decisions taken in Phase 7
 

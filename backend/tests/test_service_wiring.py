@@ -21,6 +21,7 @@ class _Integration:
     def __init__(self) -> None:
         self.customers = FakeCustomerRepository()
         self.claims = FakeClaimsRepository()
+        self.interactions = None  # Integration #2 not configured
 
 
 def _configured() -> Settings:

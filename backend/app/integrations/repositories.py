@@ -21,6 +21,7 @@ from typing import Protocol, runtime_checkable
 from app.models.claim import Claim
 from app.models.customer import Customer
 from app.models.enums import ClaimLookupOutcome, CustomerLookupOutcome, VerificationOutcome
+from app.models.interaction import InteractionRecord
 
 
 class FailureReason(StrEnum):
@@ -154,6 +155,63 @@ class CustomerRepository(Protocol):
 
         The expected value never leaves the implementation — not in the result,
         not in a log line, not in an exception.
+        """
+        ...
+
+
+class PersistOutcome(StrEnum):
+    """Result of writing a post-call record."""
+
+    PERSISTED = "PERSISTED"
+    # The call_id was already on file. Not an error — the expected answer to a
+    # redelivered webhook.
+    ALREADY_RECORDED = "ALREADY_RECORDED"
+    INTEGRATION_ERROR = "INTEGRATION_ERROR"
+
+
+@dataclass(frozen=True, slots=True)
+class PersistResult:
+    """Outcome of `save`. Never raises for an expected condition."""
+
+    outcome: PersistOutcome
+    reason: FailureReason | None = None
+
+    @property
+    def is_persisted(self) -> bool:
+        return self.outcome is PersistOutcome.PERSISTED
+
+    @property
+    def is_duplicate(self) -> bool:
+        return self.outcome is PersistOutcome.ALREADY_RECORDED
+
+    @classmethod
+    def persisted(cls) -> PersistResult:
+        return cls(PersistOutcome.PERSISTED)
+
+    @classmethod
+    def already_recorded(cls) -> PersistResult:
+        return cls(PersistOutcome.ALREADY_RECORDED)
+
+    @classmethod
+    def integration_error(cls, reason: FailureReason) -> PersistResult:
+        return cls(PersistOutcome.INTEGRATION_ERROR, reason=reason)
+
+
+@runtime_checkable
+class InteractionRepository(Protocol):
+    """Write access to the post-call interaction log (Integration #2).
+
+    Deliberately separate from the customer and claims repositories: it is a
+    different sheet, a different credential, and the only place the system
+    writes anything. Keeping the write path narrow means one place to audit.
+    """
+
+    async def save(self, record: InteractionRecord) -> PersistResult:
+        """Persist one interaction record.
+
+        Must be idempotent on `record.call_id`: a redelivered end-of-call event
+        must not produce a second row. Must not raise — a failure to file
+        paperwork cannot be allowed to affect a caller.
         """
         ...
 
