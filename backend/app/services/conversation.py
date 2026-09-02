@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.agents.specialists import Supervisor
 from app.core import events
 from app.core.context import reset_call_id, set_call_id
 from app.core.logging import event, get_logger
@@ -52,11 +53,16 @@ class ConversationService:
         sessions: SessionStore,
         tools: ToolRegistry,
         postcall: PostCallService,
+        supervisor: Supervisor | None = None,
     ) -> None:
         self._authentication = authentication
         self._sessions = sessions
         self._tools = tools
         self._postcall = postcall
+        # Optional on purpose: without a supervisor the single-agent path runs
+        # exactly as before, so the orchestration layer can be removed by
+        # passing None rather than by unpicking it.
+        self._supervisor = supervisor
 
     async def handle(self, voice_event: VoiceEvent) -> ConversationResponse:
         """Process one webhook event."""
@@ -108,15 +114,27 @@ class ConversationService:
                 extra=event(tool=invocation.name, arguments=sorted(invocation.arguments)),
             )
             # call_id comes from the platform payload, never from the model.
-            result = await self._tools.invoke(
-                invocation.name, voice_event.call_id, invocation.arguments
-            )
+            if self._supervisor is not None:
+                result, routing = await self._supervisor.dispatch(
+                    invocation.name, voice_event.call_id, invocation.arguments
+                )
+                specialist = routing.specialist.name
+            else:
+                result = await self._tools.invoke(
+                    invocation.name, voice_event.call_id, invocation.arguments
+                )
+                specialist = None
+
             results[invocation.invocation_id] = result.speech
             transfer_to = transfer_to or result.transfer_to
 
             log.info(
                 events.TOOL_COMPLETED,
-                extra=event(tool=invocation.name, outcome=result.outcome),
+                extra=event(
+                    tool=invocation.name,
+                    outcome=result.outcome,
+                    specialist=specialist,
+                ),
             )
 
         return results, transfer_to

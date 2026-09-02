@@ -6,5 +6,6 @@ caller verified, because no such mechanism exists.
 """
 
 from app.agents.prompt import load_system_prompt
+from app.agents.specialists import Intent, Specialist, Supervisor
 
-__all__ = ["load_system_prompt"]
+__all__ = ["Intent", "Specialist", "Supervisor", "load_system_prompt"]

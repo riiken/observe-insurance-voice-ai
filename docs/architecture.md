@@ -53,6 +53,34 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in the bonus phase
+
+**Specialists own domains, not logic.** Each is a frozen dataclass naming the
+tools it owns. Everything a specialist would "do" is already implemented once
+in the services those tools call, so giving it behaviour would only create
+somewhere for a second implementation to grow — which is how multi-agent
+systems begin disagreeing with themselves.
+
+**The supervisor routes deterministically.** A supervisor LLM would add a model
+round trip to every turn on a six-second budget, produce a second opinion about
+an intent the assistant has already resolved by choosing a tool, and make
+"which specialist handled this" unreproducible. Deriving intent from the chosen
+tool is the same signal without the hop.
+
+**The layer cannot move the security boundary.** The supervisor holds no
+session store, so it cannot authenticate anyone by construction rather than by
+discipline. Routing to the Claims Specialist does not authorise a claim —
+`require_authenticated` still refuses.
+
+**It cannot veto either.** An unrouted tool falls through to the registry. A
+routing layer that could refuse would be a second place for a call to fail, for
+no gain.
+
+**It is removable with one argument.** `ConversationService(supervisor=None)`
+restores the single-agent path exactly, and a test proves it. The brief asked
+for complexity that reduces reliability to be reverted; making the revert a
+parameter rather than a refactor is what makes that a real option.
+
 ## Decisions taken in Phase 11
 
 **Event names are constants.** A log query is only as good as the consistency

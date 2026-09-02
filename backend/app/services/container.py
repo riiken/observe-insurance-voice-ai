@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from app.agents.prompt import load_system_prompt
+from app.agents.specialists import Supervisor
 from app.integrations.factory import DataIntegration
 from app.integrations.voice_platform import supports_transfer
 from app.services.authentication import AuthenticationService
@@ -43,6 +44,7 @@ class ServiceContainer:
     conversation: ConversationService
     guidance: ClaimGuidance
     tools: ToolRegistry
+    supervisor: Supervisor
     system_prompt: str
     claim_status_tool: ClaimStatusTool
 
@@ -97,6 +99,11 @@ def build_services(
         safety=EmergencyInterceptor(safety, escalation, transfer_to=transfer_to),
     )
 
+    # One supervisor over the same registry: the specialists route to the very
+    # tools the single-agent path used, so there is no second implementation of
+    # anything for them to disagree about.
+    supervisor = Supervisor(tools)
+
     return ServiceContainer(
         sessions=sessions,
         authentication=authentication,
@@ -110,9 +117,11 @@ def build_services(
             sessions=sessions,
             tools=tools,
             postcall=postcall,
+            supervisor=supervisor,
         ),
         guidance=guidance,
         tools=tools,
+        supervisor=supervisor,
         system_prompt=system_prompt,
         claim_status_tool=claim_status_tool,
     )

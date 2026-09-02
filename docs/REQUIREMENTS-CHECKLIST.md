@@ -42,7 +42,7 @@ Legend: **✅** done and tested · **⚠️** done with a stated limitation · *
 | | | Notes |
 | --- | --- | --- |
 | Knowledge base integration | ✅ | Per-topic files with scored retrieval and a confidence band |
-| Multi-agent orchestration | ❌ | Not attempted. §4 says bonuses come after everything else works, and a second agent would add coordination failure modes for no capability this assignment needs. |
+| Multi-agent orchestration | ✅ | Supervisor + three specialists over the *same* registry, so no business logic is duplicated. Routing is deterministic rather than a second model call — see the README. The layer cannot authenticate anyone and is removable with one argument. |
 | Additional backend integrations | ❌ | Two integrations, as specified. |
 
 ## §5 Architecture
@@ -252,9 +252,8 @@ Legend: **✅** done and tested · **⚠️** done with a stated limitation · *
 
 ## Honest summary
 
-**Not done:** multi-agent orchestration (§4, bonus). §4 says bonuses come after
-everything else works, and a second agent would add coordination failure modes
-for no capability this assignment needs.
+**Not done:** nothing mandatory. Both bonus features — knowledge base and
+multi-agent orchestration — are implemented.
 
 **Done with a stated limitation:** `complete_call` is platform-driven rather
 than a model tool (§8); voice transfer is implemented but unverified (§13);

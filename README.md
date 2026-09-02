@@ -8,7 +8,7 @@ The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
 > **Status: core complete and demonstrated live.** All 25 mandatory
-> requirements verified offline by 821 tests, then walked scenario by scenario
+> requirements verified offline by 844 tests, then walked scenario by scenario
 > over a real voice call — see
 > [docs/CORE-COMPLETE.md](docs/CORE-COMPLETE.md#live-verification).
 > Structured events, operational metrics, a
@@ -138,6 +138,7 @@ observe-insurance-voice-ai/
 │   │   │   └── v1/voice.py      #   the webhook endpoint
 │   │   ├── agents/
 │   │   │   ├── prompt.py        #   prompt loader
+│   │   │   ├── specialists.py   #   supervisor + three specialists
 │   │   │   └── prompts/         #   claims_agent.md — the system prompt
 │   │   ├── tools/               # narrow agent-callable tools
 │   │   │   ├── base.py          #   ToolResult: structured data + spoken line
@@ -799,6 +800,65 @@ aggregates in a way it would not be for session state: losing a counter costs a
 gap in a graph, while losing a session would drop a caller mid-verification.
 Nothing in the registry is per-call, so it cannot leak PII and does not grow
 with volume — asserted.
+
+---
+
+## Multi-agent orchestration (bonus)
+
+```
+Supervisor
+├── Claims Specialist      lookup_customer · verify_identity · get_claim_status
+├── FAQ Specialist         search_faq
+└── Escalation Handler     request_representative
+```
+
+A specialist owns a **domain** — which tools belong to it — and nothing else.
+It delegates to the same `ToolRegistry` the single-agent path used, so there is
+one implementation of authentication, one of claim access, one of FAQ
+retrieval. Duplicating any of that across agents is how multi-agent systems
+start disagreeing with themselves.
+
+### Routing is deterministic, not a second model call
+
+The obvious design is a supervisor LLM that reads the transcript and picks a
+specialist. It is the wrong one here:
+
+- **Latency.** A caller is on the phone, and the whole tool budget is six
+  seconds. A routing call adds a model round trip to every turn.
+- **A second opinion that can disagree.** The assistant has *already* resolved
+  the caller's intent by choosing a tool. Inferring it again from the
+  transcript produces a second answer that can differ — and then something has
+  to arbitrate.
+- **Determinism.** This system's argument is that behaviour is a property of
+  code, not of model output. A model in the routing path makes "which
+  specialist handled this turn" unreproducible and untestable.
+
+So the supervisor derives intent from the tool the assistant chose. That is the
+same intent, already resolved, without the extra hop.
+
+### It does not move the security boundary — and that is the point
+
+The supervisor **holds no session store**, so it cannot read or write
+conversation state. `Specialist` is a frozen dataclass with one method,
+`owns()`. Neither can authenticate anyone.
+
+Routing a call to the Claims Specialist does not authorise it: `get_claim_status`
+is still refused by `require_authenticated` inside the service. A test asserts
+exactly that, and another asserts the supervisor holds nothing session-shaped.
+
+It also **cannot refuse a tool**. An unrecognised name falls through to the
+registry, which already handles it. A routing layer that could veto would be a
+second place for a call to fail.
+
+### It is removable
+
+`ConversationService(supervisor=None)` restores the single-agent path exactly —
+tested. That is the revert the brief asks for, and it is one argument rather
+than an unpicking.
+
+What the layer actually buys: **per-specialist observability.** `agent.routed`
+events and `agent_routed_total{specialist=...}` make "which domain was this
+caller in when it went wrong" a query rather than a guess.
 
 ---
 
