@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "dev", "staging", "prod"]
@@ -58,14 +58,20 @@ class Settings(BaseSettings):
     # Configured claim guidance. None resolves to knowledge/claim_guidance.json
     # at the repository root; override to point at a different content set.
     claim_guidance_path: Path | None = None
+    # Supported FAQ answers. None resolves to knowledge/faq.json.
+    faq_path: Path | None = None
+    # The agent's system prompt. None resolves to the file shipped with the app.
+    system_prompt_path: Path | None = None
 
     # --- Telephony ---------------------------------------------------------
     # Applied to national-format numbers a caller reads out without a country code.
     default_phone_country_code: str = "+1"
 
     # --- Security ----------------------------------------------------------
-    # Shared secret the voice platform presents on webhook calls. Unset in local
-    # development means the check is skipped; required from staging onwards.
+    # Shared secret the voice platform presents on webhook calls (Vapi sends it
+    # as the `x-vapi-secret` header). Unset in local development means the check
+    # is skipped; a production environment refuses to start without it, because
+    # an unauthenticated webhook is an open door to the tool layer.
     voice_platform_api_key: str | None = None
 
     @field_validator("log_level")
@@ -84,6 +90,15 @@ class Settings(BaseSettings):
         if not code.startswith("+") or not code[1:].isdigit():
             raise ValueError("default_phone_country_code must look like '+1'")
         return code
+
+    @model_validator(mode="after")
+    def _require_webhook_secret_in_production(self) -> Settings:
+        if self.is_production and not self.voice_platform_api_key:
+            raise ValueError(
+                "VOICE_PLATFORM_API_KEY is required when ENVIRONMENT is staging or prod: "
+                "an unauthenticated webhook would expose the tool layer."
+            )
+        return self
 
     @property
     def is_production(self) -> bool:

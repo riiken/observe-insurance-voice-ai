@@ -53,6 +53,45 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 5
+
+**One file knows the provider.** `integrations/voice_platform.py` translates
+Vapi's payloads into `VoiceEvent` and `ToolInvocation`; everything above speaks
+only those. Swapping platforms is a rewrite of one module, not a search through
+the codebase for "vapi".
+
+**Parsing is forgiving, dispatch is strict.** The adapter accepts three
+tool-call shapes and ignores message types it does not recognise, because a
+payload change should not drop a live call. The registry then discards any
+argument a tool did not declare — so tolerance at the edge never becomes
+tolerance at the boundary.
+
+**`call_id` comes from the platform, never from the model.** It is not a tool
+parameter. The dispatcher injects it, so a model cannot name a different call
+and inherit its authentication, and it is bound to the logging context for the
+duration of an event so every line from one call filters together.
+
+**Tools are the whole attack surface, and it is five items long.** No generic
+query tool, no raw API access. The worst a compromised prompt can do is call a
+narrow operation that enforces its own rules.
+
+**The webhook answers 200 even when handling fails.** A 500 makes Vapi retry or
+drop the call. A caller should not lose a phone call because a tool raised —
+they should hear an apology and be offered a person.
+
+**The prompt describes behaviour, not rules.** It says how to sound and which
+tool to reach for. It does not decide who is authenticated, what a claim says,
+or what the office hours are. A prompt that gets rewritten — or argued with by a
+caller — cannot change any of those, because none of them live there.
+
+**The call outcome is derived from state, not from the transcript.** Whether a
+caller was verified or escalated is something we observed; it should not depend
+on how a summary was worded.
+
+**Production refuses to start without a webhook secret.** An unauthenticated
+webhook is an open door to the tool layer, and a missing environment variable is
+exactly the kind of thing that ships quietly.
+
 ## Decisions taken in Phase 4
 
 **Authentication is enforced at two layers, and only one can say yes.** The

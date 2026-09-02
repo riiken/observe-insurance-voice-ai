@@ -33,6 +33,11 @@ class ToolOutcome(StrEnum):
     NOT_AUTHORIZED = "NOT_AUTHORIZED"
     INCOMPLETE_DATA = "INCOMPLETE_DATA"
     INTEGRATION_ERROR = "INTEGRATION_ERROR"
+    # The caller gave something we could not use — a mis-heard phone number,
+    # an empty answer. Distinct from NOT_FOUND: there is something to retry.
+    INVALID_INPUT = "INVALID_INPUT"
+    # A bounded budget is spent. Retrying cannot help; a human can.
+    EXHAUSTED = "EXHAUSTED"
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,4 +65,5 @@ class ToolResult(Generic[TPayload]):
         return self.outcome in (
             ToolOutcome.INCOMPLETE_DATA,
             ToolOutcome.INTEGRATION_ERROR,
+            ToolOutcome.EXHAUSTED,
         )

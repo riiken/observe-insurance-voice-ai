@@ -7,11 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 4 complete — authenticated claims support.**
-> The service runs; a verified caller can ask about their claim and get a
-> spoken answer, including the documents-required workflow. Still to come: the
-> remaining tools (FAQ, escalation, call completion), the agent prompt layer,
-> and the voice platform webhook.
+> **Status: Phase 5 complete — a real caller can hold a conversation.**
+> Vapi is wired to the backend: greeting, authentication, claim status, FAQ and
+> escalation all work over the webhook. Still to come: post-call interaction
+> records (Integration #2).
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -99,6 +98,8 @@ and copied into a clean `python:3.13-slim` runtime that runs as a non-root user.
 | ------ | --------------- | --------------------------------------------------------- |
 | GET    | `/health`       | Liveness. Process is up. Never touches external systems.  |
 | GET    | `/ready`        | Readiness. Probes registered dependencies; 503 if any is unhealthy. |
+| POST   | `/api/v1/voice/webhook` | Every voice-platform event: call start, tool calls, completion. Requires the `x-vapi-secret` header. |
+| GET    | `/api/v1/voice/assistant-config` | The prompt and tool schemas to configure the assistant with, generated from the code that implements them. |
 | GET    | `/docs`         | OpenAPI UI. Disabled when `ENVIRONMENT` is `staging`/`prod`. |
 
 Once Sheets is configured, `/ready` probes both repositories and returns 503 if
@@ -126,16 +127,25 @@ observe-insurance-voice-ai/
 │   │   │   ├── dependencies.py  #   shared FastAPI dependencies
 │   │   │   ├── health.py        #   liveness + readiness (unversioned)
 │   │   │   ├── router.py        #   router assembly
-│   │   │   └── v1/router.py     #   versioned product API (empty in Phase 1)
-│   │   ├── agents/              # conversation orchestration        (Phase 4)
+│   │   │   └── v1/voice.py      #   the webhook endpoint
+│   │   ├── agents/
+│   │   │   ├── prompt.py        #   prompt loader
+│   │   │   └── prompts/         #   claims_agent.md — the system prompt
 │   │   ├── tools/               # narrow agent-callable tools
 │   │   │   ├── base.py          #   ToolResult: structured data + spoken line
-│   │   │   └── claim_status.py  #   get_claim_status
+│   │   │   ├── registry.py      #   the five tools, and dispatch
+│   │   │   ├── authentication_tools.py
+│   │   │   ├── claim_status.py
+│   │   │   ├── faq_tool.py
+│   │   │   └── representative_tool.py
 │   │   ├── services/            # business logic — the only layer that decides
 │   │   │   ├── session_store.py #   server-side session persistence
 │   │   │   ├── authentication.py#   the START -> AUTHENTICATED state machine
 │   │   │   ├── authorization.py #   the single claim-access gate
 │   │   │   ├── claims.py        #   claim access, gated on session state
+│   │   │   ├── conversation.py  #   call lifecycle, provider-neutral
+│   │   │   ├── escalation.py    #   escalation records
+│   │   │   ├── faq.py           #   deterministic FAQ matching
 │   │   │   ├── guidance.py      #   configured claim guidance loader
 │   │   │   ├── voice.py         #   structured data -> natural speech
 │   │   │   └── container.py     #   service assembly
@@ -144,6 +154,7 @@ observe-insurance-voice-ai/
 │   │   │   ├── registry.py      #   readiness probe registry
 │   │   │   ├── repositories.py  #   CustomerRepository / ClaimsRepository contracts
 │   │   │   ├── factory.py       #   builds Integration #1 from settings
+│   │   │   ├── voice_platform.py#   ALL Vapi-specific code lives here
 │   │   │   └── sheets/          #   Google Sheets adapters
 │   │   │       ├── client.py    #     REST transport; no domain knowledge
 │   │   │       ├── rows.py      #     row -> domain object, malformed-data policy
@@ -166,9 +177,11 @@ observe-insurance-voice-ai/
 ├── docs/
 │   ├── architecture.md
 │   ├── google-sheets-setup.md   # sheet schema + setup
+│   ├── vapi-setup.md            # configuring the voice assistant
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
-│   └── claim_guidance.json      # next steps + submission instructions
+│   ├── claim_guidance.json      # next steps + submission instructions
+│   └── faq.json                 # the supported general answers
 ├── scripts/seed_data/           # demo customer + claim CSVs
 ├── docker-compose.yml
 └── .env.example
@@ -398,13 +411,96 @@ are fixed strings containing no status words.
 
 ---
 
+## Voice platform (Vapi)
+
+```
+Caller → Vapi (speech, LLM, TTS) → POST /api/v1/voice/webhook
+                                        ↓
+                                  ConversationService
+                                        ↓
+                                   ToolRegistry — five tools
+                                        ↓
+                                     Services → Google Sheets
+```
+
+Vapi owns the voice experience. This backend owns everything that must be
+*correct*. Setup instructions are in
+[docs/vapi-setup.md](docs/vapi-setup.md).
+
+**All provider-specific code lives in one file**,
+[`integrations/voice_platform.py`](backend/app/integrations/voice_platform.py).
+Everything above it speaks in `VoiceEvent` and `ToolInvocation`. Swapping Vapi
+for another platform means rewriting that module and nothing else.
+
+Its payload parsing accepts three tool-call shapes (`toolCallList`, `toolCalls`,
+the older `functionCall`) because Vapi has changed them across versions — a
+payload change should not take a phone line down. Unrecognised message types are
+acknowledged and ignored rather than rejected, for the same reason.
+
+### The five tools
+
+| Tool | Arguments | Before verification |
+| ---- | --------- | ------------------- |
+| `lookup_customer` | `phone_number` | yes |
+| `verify_identity` | `verification_value` | yes |
+| `get_claim_status` | *none* | **refuses** |
+| `search_faq` | `question` | yes |
+| `request_representative` | `reason`, `notes` | yes |
+
+That list is the entire attack surface. There is no generic query tool, no
+"call this API", no escape hatch.
+
+### Why the model cannot bypass authentication
+
+- **`call_id` is not a tool parameter.** It comes from the platform's webhook
+  payload and is injected by the dispatcher, so the model cannot name a
+  different call and inherit its authentication.
+- **The registry drops arguments no tool declares.** A forged `authenticated`,
+  `skip_auth` or `override` is logged and discarded before any handler runs.
+- **Nothing in the payload is deserialised into session state.** A `call` object
+  claiming `"authenticated": true` changes nothing.
+- **`get_claim_status` takes no arguments at all**, so there is no field for an
+  identity to travel in.
+- **The session is released when the call ends**, so a call id cannot be reused.
+
+Tested with the CLAUDE.md §7 strings pushed through every caller-facing input
+and every forged-argument shape — 43 tests in
+[`test_voice_security.py`](backend/tests/test_voice_security.py) alone.
+
+### Agent instructions
+
+The system prompt is a Markdown file:
+[`claims_agent.md`](backend/app/agents/prompts/claims_agent.md). It covers tone,
+turn structure and which tool to reach for.
+
+What is deliberately *not* in it: any business rule that matters. It does not
+decide who is authenticated, what a claim says, or what the office hours are —
+those live in services and configured content, so a prompt that gets rewritten
+(or argued with by a caller) cannot change them.
+
+### FAQ
+
+Answers come from [`knowledge/faq.json`](knowledge/faq.json) by deterministic
+keyword matching, not from the model. An answer either exists and is read out
+verbatim, or none exists and the caller is offered a representative. There is no
+middle path where something plausible gets composed.
+
+### Emergencies
+
+`request_representative` with `reason: EMERGENCY` returns a fixed line pointing
+the caller at 911 and logs at ERROR. The agent does not pretend to be an
+emergency service, and stops the claims conversation rather than troubleshooting
+a claim while somebody is in danger.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-364 tests, all deterministic and offline — no Google credentials, no network.
+532 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so
@@ -431,11 +527,11 @@ validation; and log shape and redaction.
 Phases 1–2 cover the foundation and the customer/claim data integration.
 Deliberately **not** implemented yet:
 
-- The remaining five tools: `lookup_customer`, `verify_identity`, `search_faq`,
-  `request_representative`, `complete_call`
-- Agent prompts, turn handling and emergency routing
-- FAQ knowledge content and the FAQ service
-- Escalation records (session state tracks escalation; no record is written yet)
+- Integration #2: post-call interaction records (caller name, summary,
+  sentiment, timestamp) written to an external system
+- Real call transfer — `request_representative` creates an escalation record and
+  tells the caller, but does not hand the call to a Vapi transfer destination
+- Escalation records are held in memory rather than persisted
 - The voice platform webhook and any LLM orchestration
 - FAQ knowledge base content
 - Integration #2: post-call interaction persistence

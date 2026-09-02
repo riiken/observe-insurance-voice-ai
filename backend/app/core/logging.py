@@ -130,6 +130,12 @@ def configure_logging(
     # The access log is emitted by our middleware in structured form instead.
     logging.getLogger("uvicorn.access").disabled = True
 
+    # httpx logs every request at INFO *including the full URL* — which for the
+    # Sheets API means the API key in a query parameter. Our own `sheets.fetch`
+    # line records the same request without the credential.
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 
 def get_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)

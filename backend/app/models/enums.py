@@ -77,6 +77,28 @@ class ClaimStatus(StrEnum):
     DOCUMENTS_REQUIRED = "DOCUMENTS_REQUIRED"
 
 
+class EscalationReason(StrEnum):
+    """Why a call is going to a human.
+
+    A controlled vocabulary rather than free text, because the reason drives
+    routing and priority — and because `EMERGENCY` must be greppable in a log.
+    """
+
+    CALLER_REQUEST = "CALLER_REQUEST"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
+    CUSTOMER_NOT_FOUND = "CUSTOMER_NOT_FOUND"
+    UNSUPPORTED_REQUEST = "UNSUPPORTED_REQUEST"
+    CLAIM_DATA_INCOMPLETE = "CLAIM_DATA_INCOMPLETE"
+    SYSTEM_ERROR = "SYSTEM_ERROR"
+    EMERGENCY = "EMERGENCY"
+
+
+class EscalationStatus(StrEnum):
+    PENDING = "PENDING"
+    ROUTED = "ROUTED"
+    FAILED = "FAILED"
+
+
 class Sentiment(StrEnum):
     POSITIVE = "POSITIVE"
     NEUTRAL = "NEUTRAL"

@@ -26,6 +26,7 @@ def test_values_are_read_from_the_environment(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setenv("ENVIRONMENT", "prod")
     monkeypatch.setenv("LOG_LEVEL", "warning")
     monkeypatch.setenv("PORT", "9001")
+    monkeypatch.setenv("VOICE_PLATFORM_API_KEY", "secret")  # required in prod
 
     settings = _settings()
 
@@ -52,3 +53,20 @@ def test_retry_budget_is_bounded() -> None:
 
 def test_get_settings_is_cached() -> None:
     assert get_settings() is get_settings()
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_production_refuses_to_start_without_a_webhook_secret(environment: str) -> None:
+    """An unauthenticated webhook is an open door to the tool layer."""
+    with pytest.raises(ValidationError):
+        _settings(environment=environment)
+
+
+@pytest.mark.parametrize("environment", ["staging", "prod"])
+def test_production_starts_once_the_secret_is_set(environment: str) -> None:
+    assert _settings(environment=environment, voice_platform_api_key="s").is_production
+
+
+def test_local_development_does_not_need_a_webhook_secret() -> None:
+    """Requiring one locally would mean nobody could run the service to look at it."""
+    assert _settings(environment="local").voice_platform_api_key is None

@@ -36,7 +36,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # read a claim has nothing to offer, so the API reports it unavailable
     # rather than pretending.
     app.state.services = (
-        build_services(integration, guidance_path=settings.claim_guidance_path)
+        build_services(
+            integration,
+            guidance_path=settings.claim_guidance_path,
+            faq_path=settings.faq_path,
+            prompt_path=settings.system_prompt_path,
+        )
         if integration is not None
         else None
     )

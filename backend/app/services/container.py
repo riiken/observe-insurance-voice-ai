@@ -9,12 +9,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.agents.prompt import load_system_prompt
 from app.integrations.factory import DataIntegration
 from app.services.authentication import AuthenticationService
 from app.services.claims import ClaimsService
+from app.services.conversation import ConversationService
+from app.services.escalation import EscalationService
+from app.services.faq import FaqService, load_faq_content
 from app.services.guidance import ClaimGuidance, load_claim_guidance
 from app.services.session_store import InMemorySessionStore, SessionStore
+from app.tools.authentication_tools import LookupCustomerTool, VerifyIdentityTool
 from app.tools.claim_status import ClaimStatusTool
+from app.tools.faq_tool import SearchFaqTool
+from app.tools.registry import ToolRegistry, build_registry
+from app.tools.representative_tool import RequestRepresentativeTool
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,12 +32,21 @@ class ServiceContainer:
     sessions: SessionStore
     authentication: AuthenticationService
     claims: ClaimsService
+    escalation: EscalationService
+    faq: FaqService
+    conversation: ConversationService
     guidance: ClaimGuidance
+    tools: ToolRegistry
+    system_prompt: str
     claim_status_tool: ClaimStatusTool
 
 
 def build_services(
-    integration: DataIntegration, *, guidance_path: Path | None = None
+    integration: DataIntegration,
+    *,
+    guidance_path: Path | None = None,
+    faq_path: Path | None = None,
+    prompt_path: Path | None = None,
 ) -> ServiceContainer:
     """Wire the services and tools onto Integration #1.
 
@@ -44,13 +61,39 @@ def build_services(
     about a customer's claim mid-call.
     """
     sessions = InMemorySessionStore()
+
+    # All configured content is read here, at startup. Missing or incomplete
+    # content fails the process rather than surfacing mid-call.
     guidance = load_claim_guidance(guidance_path)
+    faq = FaqService(load_faq_content(faq_path))
+    system_prompt = load_system_prompt(prompt_path)
+
+    authentication = AuthenticationService(integration.customers, sessions)
     claims = ClaimsService(integration.claims, sessions)
+    escalation = EscalationService(sessions)
+
+    claim_status_tool = ClaimStatusTool(claims, guidance)
+
+    # The five tools the agent gets. Nothing else is reachable from a webhook.
+    tools = build_registry(
+        lookup_customer=LookupCustomerTool(authentication),
+        verify_identity=VerifyIdentityTool(authentication),
+        get_claim_status=claim_status_tool,
+        search_faq=SearchFaqTool(faq),
+        request_representative=RequestRepresentativeTool(escalation),
+    )
 
     return ServiceContainer(
         sessions=sessions,
-        authentication=AuthenticationService(integration.customers, sessions),
+        authentication=authentication,
         claims=claims,
+        escalation=escalation,
+        faq=faq,
+        conversation=ConversationService(
+            authentication=authentication, sessions=sessions, tools=tools
+        ),
         guidance=guidance,
-        claim_status_tool=ClaimStatusTool(claims, guidance),
+        tools=tools,
+        system_prompt=system_prompt,
+        claim_status_tool=claim_status_tool,
     )

@@ -15,11 +15,7 @@ was not deferred — it was missed.
 
 | # | Item | Why deferred | Lands in |
 | - | ---- | ------------ | -------- |
-| 1.2 | Five of the six tools: `lookup_customer`, `verify_identity`, `search_faq`, `request_representative`, `complete_call`. `get_claim_status` shipped in Phase 4. | The authentication service already exposes the lookup and verify operations; wrapping them as agent tools belongs with the agent that calls them | Phase 5 (`tools/`) |
-| 1.3 | Agent prompts, turn handling, escalation and emergency routing | Depends on the remaining tools | Phase 5 (`agents/`) |
-| 1.4 | Voice platform webhook + API key enforcement (`VOICE_PLATFORM_API_KEY` is configured but unread) | No conversation to drive yet | Phase 5 (`api/v1/`) |
-| 1.5 | FAQ knowledge content | Not needed until the FAQ tool exists | Phase 5 (`knowledge/`) |
-| 1.6 | Post-call interaction persistence (Integration #2) | Separate integration from customer/claims | Phase 5 (`integrations/`) |
+| 1.6 | Post-call interaction persistence (Integration #2) — caller name, summary, sentiment, timestamp | Separate integration from customer/claims. The `end-of-call-report` webhook that carries the summary is now handled, so the hook exists | Phase 6 (`integrations/`) |
 
 ### From Phase 2 — customer + claim data integration
 
@@ -35,9 +31,9 @@ was not deferred — it was missed.
 | # | Item | Why deferred | Lands in |
 | - | ---- | ------------ | -------- |
 | 3.1 | **Sessions do not survive a restart or spread across replicas.** `InMemorySessionStore` is process-local. | A call is handled by one process for its lifetime, and a dropped call loses nothing that matters. `SessionStore` is a protocol, so Redis is an implementation swap — but adding a datastore this assignment does not need would be exactly the distributed infrastructure CLAUDE.md §23 warns against. | Only if deployed multi-replica |
-| 3.2 | **Abandoned sessions are never evicted.** `discard` exists but nothing calls it on a timeout. | Bounded in practice by process lifetime and a demo-scale call volume. The right trigger is call completion, which arrives with the post-call phase. | Phase 5 (`complete_call`) |
-| 3.3 | **Escalation records are not written.** Session state tracks `escalated` and `escalation_reason`, but no structured escalation record (id, timestamp, status) is created. | CLAUDE.md §13 wants a record with an escalation id and status; that is an integration concern, and it belongs with the tool that requests it. | Phase 5 (`services/escalation.py`) |
-| 3.4 | **`conversation_outcome` is set but not yet persisted anywhere.** | It feeds the post-call interaction record, which is Integration #2. | Phase 5 |
+| 3.2 | **Sessions from calls that never send an end-of-call event are not evicted.** Normal completion now discards them. | The remaining leak is a call that drops without Vapi reporting it. A TTL sweep would close it; process lifetime bounds it in practice. | Only if long-running |
+| 3.5b | **Escalation records are held in memory, not persisted.** The record is created and logged; nothing writes it to an external system. | Persisting it belongs with Integration #2, which is where external writes get their client and retry policy. | Phase 6 |
+| 3.4 | **`conversation_outcome` is set but not yet persisted anywhere.** | It feeds the post-call interaction record, which is Integration #2. | Phase 6 |
 | 3.5 | **The verification value is a date of birth.** A single static secret, checked in constant time but not rate-limited beyond the three-attempt budget. | Adequate for a take-home demo and the sheet schema the brief specifies. Real deployments would want a rotating value, or a second factor, and rate limiting per phone number across calls rather than only within one. | Not scoped |
 
 ### From Phase 4 — authenticated claims support
@@ -47,7 +43,18 @@ was not deferred — it was missed.
 | 4.1 | **Multiple claims are still collapsed to the most recent.** `get_claim_status` answers about one claim. | Unchanged from 2.4: "which of your three claims?" is a conversation-design problem. The tool would need a disambiguation turn, which belongs with the agent. | Phase 5, if scoped |
 | 4.2 | **Guidance is loaded once at startup.** Editing `claim_guidance.json` needs a restart. | A reload endpoint is more surface than a take-home needs, and a restart is a deploy. Worth adding only if the claims team edits content live. | Not scoped |
 | 4.3 | **The voice layer is English-only, with hard-coded connective wording.** Statuses and next steps are configurable; the sentences joining them are not. | Externalising sentence templates buys nothing until there is a second language or a brand-voice review. The configured content already covers everything factual. | Not scoped |
-| 4.4 | **`render_submission_instructions` and `render_mailing_address` have no tool yet.** They are written and tested, but nothing calls them — the follow-up turn ("yes, tell me how to send them") needs the agent. | The claim tool offers the explanation; delivering it is a second conversational turn, which is Phase 5's job. | Phase 5 (`agents/`) |
+| 4.4 | **`render_submission_instructions` and `render_mailing_address` are still not wired to a tool.** The `document_submission` FAQ entry now covers the same ground, so a caller who asks does get an answer — via `search_faq` rather than as a claim follow-up. | The duplication is small and the FAQ path is well tested. Folding them together needs a decision about whether submission detail belongs to the claim or to the FAQ, which is not worth making under a deadline. | When the duplication bites |
+
+### From Phase 5 — voice platform integration
+
+| # | Item | Why deferred | Lands in |
+| - | ---- | ------------ | -------- |
+| 5.1 | **No live call has been placed.** The webhook is exercised end to end over HTTP with real Vapi payload shapes, but nobody has dialled a phone number. | Needs a Vapi account, a public tunnel and a phone number — none of which belong in an automated test. `docs/vapi-setup.md` is written to be followed exactly once, then verified against the scenario table. | Manual verification |
+| 5.2 | **`request_representative` does not transfer the call.** It creates an escalation record and tells the caller they are being put through; the call then continues with the assistant. | Real transfer needs a Vapi `transferCall` destination and somewhere to transfer *to*. CLAUDE.md §13 explicitly accepts a realistic escalation workflow where transfer is unavailable. | When a destination exists |
+| 5.3 | **The webhook is not idempotent.** Vapi retries a failed delivery; a retried `verify_identity` would spend a second attempt. | The endpoint answers 200 on almost everything, so retries are rare in practice. Proper handling means deduplicating on the tool-call id, which is a small change but needs a store with a TTL. | Before production |
+| 5.4 | **FAQ matching is keyword overlap, not semantic.** "When can I reach you?" scores nothing against `office_hours`. | It fails towards a representative, which is the safe direction, and it is fully deterministic and testable. Embeddings would improve recall at the cost of a dependency, a model call in the hot path, and non-determinism in tests. | Bonus (knowledge base) |
+| 5.5 | **No per-call rate limiting on tools.** A model in a loop could call `search_faq` indefinitely. | Vapi bounds call duration, and the authentication budgets bound the paths that matter. A general limiter is real production hardening, not take-home scope. | Before production |
+| 5.6 | **Sentiment is not captured.** `Sentiment` exists in the vocabulary but nothing produces one. | It belongs to the post-call record, which is Integration #2. | Phase 6 |
 
 ---
 
@@ -60,3 +67,8 @@ was not deferred — it was missed.
 | 1.1 | Session state model and the authentication boundary | Phase 3 — frozen `SessionState`, the `AuthenticationService` state machine, and `require_authenticated` as the single claim-access gate |
 | 2.5 | Repositories unreachable from a request | Phase 3 — `ServiceContainer` is built at startup and served through `api/dependencies.py`, which returns 503 when the integration is absent |
 | 1.2 (part) | `get_claim_status` tool | Phase 4 — with a structured response, a configured next step, and a voice rendering |
+| 1.2 | The remaining four tools | Phase 5 — `lookup_customer`, `verify_identity`, `search_faq`, `request_representative`, behind a registry that is the whole attack surface |
+| 1.3 | Agent prompt, turn structure, emergency routing | Phase 5 — `app/agents/prompts/claims_agent.md`, carrying behaviour but no business rules |
+| 1.4 | Voice platform webhook and secret enforcement | Phase 5 — `POST /api/v1/voice/webhook`; production refuses to start without a secret |
+| 1.5 | FAQ knowledge content | Phase 5 — `knowledge/faq.json`, matched deterministically |
+| 3.3 | Structured escalation records | Phase 5 — `EscalationService` creates id, call, customer, reason, timestamp and status |

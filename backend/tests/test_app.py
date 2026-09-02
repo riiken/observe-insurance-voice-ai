@@ -14,7 +14,7 @@ def test_openapi_is_available_outside_production(client: TestClient) -> None:
 
 
 def test_docs_are_disabled_in_production() -> None:
-    app = create_app(Settings(_env_file=None, environment="prod"))
+    app = create_app(Settings(_env_file=None, environment="prod", voice_platform_api_key="secret"))
 
     with TestClient(app) as client:
         assert client.get("/docs").status_code == 404
@@ -33,7 +33,14 @@ def test_settings_are_attached_to_app_state(app) -> None:
 
 def test_routes_use_the_settings_the_app_was_built_with() -> None:
     """Injected settings must win over the process-wide cached settings."""
-    app = create_app(Settings(_env_file=None, environment="staging", app_name="explicit-name"))
+    app = create_app(
+        Settings(
+            _env_file=None,
+            environment="staging",
+            app_name="explicit-name",
+            voice_platform_api_key="secret",
+        )
+    )
 
     with TestClient(app) as client:
         body = client.get("/health").json()

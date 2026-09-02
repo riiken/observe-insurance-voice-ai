@@ -101,6 +101,14 @@ def test_configure_logging_is_idempotent() -> None:
     assert len(logging.getLogger().handlers) == 1
 
 
+def test_http_client_logging_cannot_leak_credentials() -> None:
+    """httpx logs full URLs at INFO, and the Sheets key travels in the query."""
+    configure_logging(level="DEBUG", log_format="json", stream=io.StringIO())
+
+    assert logging.getLogger("httpx").level >= logging.WARNING
+    assert logging.getLogger("httpcore").level >= logging.WARNING
+
+
 def test_json_formatter_never_raises_on_unserialisable_values() -> None:
     record = logging.LogRecord("test", logging.INFO, __file__, 1, "tool.error", None, None)
     record.event_fields = {"value": object()}
