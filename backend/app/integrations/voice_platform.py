@@ -94,13 +94,17 @@ def parse_webhook(payload: dict[str, Any]) -> VoiceEvent:
     `IGNORED`, because rejecting a payload Vapi decided to add would drop a live
     call for no benefit.
     """
-    message = payload.get("message")
-    if not isinstance(message, dict):
+    raw_message = payload.get("message")
+    message: dict[str, Any] = (
+        raw_message
+        if isinstance(raw_message, dict)
         # Some Vapi versions post the message unwrapped.
-        message = payload if isinstance(payload, dict) else {}
+        else (payload if isinstance(payload, dict) else {})
+    )
 
     raw_type = str(message.get("type") or "")
-    call = message.get("call") if isinstance(message.get("call"), dict) else {}
+    raw_call = message.get("call")
+    call: dict[str, Any] = raw_call if isinstance(raw_call, dict) else {}
     call_id = str(call.get("id") or message.get("callId") or "")
 
     if raw_type in _TOOL_TYPES:
@@ -185,7 +189,8 @@ def _tool_invocation(entry: Any) -> ToolInvocation | None:
     if not isinstance(entry, dict):
         return None
 
-    function = entry.get("function") if isinstance(entry.get("function"), dict) else {}
+    raw_function = entry.get("function")
+    function: dict[str, Any] = raw_function if isinstance(raw_function, dict) else {}
     name = _as_optional_str(entry.get("name") or function.get("name"))
     if not name:
         return None
@@ -272,7 +277,8 @@ def _caller_phone(call: dict[str, Any]) -> str | None:
     Treated as a hint that seeds the lookup, never as proof of identity — the
     caller still verifies.
     """
-    customer = call.get("customer") if isinstance(call.get("customer"), dict) else {}
+    raw_customer = call.get("customer")
+    customer: dict[str, Any] = raw_customer if isinstance(raw_customer, dict) else {}
     return _as_optional_str(customer.get("number"))
 
 

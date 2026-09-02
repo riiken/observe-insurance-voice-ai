@@ -24,6 +24,9 @@ dev = [
     "pytest>=8.2",
     "pytest-asyncio>=0.23",
     "ruff>=0.5",
+    # The codebase annotates everything; without a checker those annotations
+    # are documentation, not a guarantee.
+    "mypy>=1.10",
 ]
 
 [build-system]
@@ -37,6 +40,16 @@ include = ["app*"]
 testpaths = ["tests"]
 addopts = "-q"
 asyncio_mode = "auto"
+
+[tool.mypy]
+# Scoped to app/. Tests use deliberately loose fakes and partial fixtures, and
+# type-checking them would trade real signal for noise.
+files = ["app"]
+python_version = "3.11"
+ignore_missing_imports = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
 
 [tool.ruff]
 line-length = 100

@@ -197,6 +197,17 @@ def test_the_assistant_config_lists_exactly_the_five_tools(client: TestClient) -
     }
 
 
+def test_the_assistant_config_carries_the_greeting(client: TestClient) -> None:
+    """The caller is greeted before any webhook fires, so the greeting is config."""
+    body = client.get("/api/v1/voice/assistant-config").json()
+
+    greeting = body["firstMessage"]
+    assert "Observe Insurance" in greeting
+    assert "claims assistant" in greeting
+    assert greeting.rstrip().endswith("?")  # opens with one question
+    assert len(greeting.split()) <= 30  # short enough to hear
+
+
 def test_the_assistant_config_carries_the_system_prompt(client: TestClient) -> None:
     body = client.get("/api/v1/voice/assistant-config").json()
 

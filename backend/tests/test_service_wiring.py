@@ -110,3 +110,32 @@ def test_services_are_torn_down_on_shutdown() -> None:
         pass
 
     assert app.state.services is None
+
+
+# --- content resolution -------------------------------------------------------
+
+
+def test_the_knowledge_directory_is_found_not_assumed() -> None:
+    """It sits at a different depth in the repo than in the container."""
+    from app.core.paths import knowledge_directory
+
+    directory = knowledge_directory()
+
+    assert directory.is_dir()
+    assert (directory / "claim_guidance.json").is_file()
+    assert (directory / "office_hours.md").is_file()
+
+
+def test_the_service_layer_builds_with_no_content_paths_configured() -> None:
+    """The regression that broke the container: defaults must resolve unaided.
+
+    The image could not start with the integration configured, because the FAQ
+    directory default assumed the repository layout. It went unnoticed because
+    the container was only ever smoke-tested unconfigured, where content is
+    never loaded.
+    """
+    services = build_services(_Integration())  # type: ignore[arg-type]
+
+    assert services.faq.topics
+    assert services.guidance.submission.mailing_address
+    assert services.system_prompt

@@ -173,7 +173,8 @@ class ServiceAccountAuthorizer:
 
         issued_at = int(time.time())
         signer = crypt.RSASigner.from_service_account_info(self._info)
-        return jwt.encode(
+        # google-auth is untyped; jwt.encode returns bytes at runtime.
+        assertion: bytes = jwt.encode(
             signer,
             {
                 "iss": self._info["client_email"],
@@ -182,7 +183,8 @@ class ServiceAccountAuthorizer:
                 "iat": issued_at,
                 "exp": issued_at + _ASSERTION_LIFETIME_SECONDS,
             },
-        ).decode("utf-8")
+        )
+        return assertion.decode("utf-8")
 
     async def aclose(self) -> None:
         await self._client.aclose()

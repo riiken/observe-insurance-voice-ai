@@ -203,15 +203,19 @@ class AuthenticationService:
         if session.authentication_status is AuthenticationStatus.AUTHENTICATION_FAILED:
             return self._result(AuthenticationStep.ATTEMPTS_EXHAUSTED, session)
 
-        if session.customer_id is None:
+        customer_id = session.customer_id
+        if customer_id is None:
             # Nothing to verify against — the caller has not been identified yet.
             return self._result(AuthenticationStep.PHONE_REQUIRED, session)
 
         if not session.can_attempt_verification:
             return self._result(AuthenticationStep.ATTEMPTS_EXHAUSTED, session)
 
+        # Bound before the session is replaced below: the identity being
+        # verified is the one established at lookup, and holding it in a local
+        # says so rather than relying on a transition never touching the field.
         session = await self._save_session(session.with_verification_started())
-        result = await self._customers.verify_customer(session.customer_id, verification_value)
+        result = await self._customers.verify_customer(customer_id, verification_value)
 
         if result.outcome is VerificationOutcome.INTEGRATION_ERROR:
             # An unreachable upstream must not spend the caller's budget.

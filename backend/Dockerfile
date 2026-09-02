@@ -30,8 +30,7 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
     ENVIRONMENT=prod \
     LOG_FORMAT=json \
-    PORT=8000 \
-    CLAIM_GUIDANCE_PATH=/srv/knowledge/claim_guidance.json
+    PORT=8000
 
 # Run unprivileged.
 RUN useradd --create-home --uid 1000 appuser

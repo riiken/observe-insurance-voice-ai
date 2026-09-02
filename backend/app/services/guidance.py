@@ -21,13 +21,12 @@ from pydantic import BaseModel, Field, ValidationError
 
 from app.core.errors import AppError
 from app.core.logging import event, get_logger
+from app.core.paths import knowledge_directory
 from app.models.enums import ClaimStatus
 
 log = get_logger(__name__)
 
-# backend/app/services/guidance.py -> repository root
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_GUIDANCE_PATH = _REPO_ROOT / "knowledge" / "claim_guidance.json"
+DEFAULT_GUIDANCE_PATH = knowledge_directory() / "claim_guidance.json"
 
 
 class GuidanceConfigurationError(AppError):

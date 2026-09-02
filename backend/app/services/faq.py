@@ -27,12 +27,11 @@ from pathlib import Path
 
 from app.core.errors import AppError
 from app.core.logging import event, get_logger
+from app.core.paths import knowledge_directory
 
 log = get_logger(__name__)
 
-# backend/app/services/faq.py -> repository root
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_FAQ_DIRECTORY = _REPO_ROOT / "knowledge"
+DEFAULT_FAQ_DIRECTORY = knowledge_directory()
 
 # The four topics CLAUDE.md requires. Startup fails without them, rather than
 # discovering the gap when a caller asks.

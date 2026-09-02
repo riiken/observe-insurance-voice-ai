@@ -7,7 +7,8 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 11 complete — observability and production hardening.**
+> **Status: core complete.** All 25 mandatory requirements verified —
+> see [docs/CORE-COMPLETE.md](docs/CORE-COMPLETE.md).
 > Structured events, operational metrics, a
 > [security review](docs/SECURITY-REVIEW.md), and a
 > [failure matrix](docs/FAILURE-MATRIX.md) generated from code so it cannot
@@ -68,7 +69,9 @@ transport.
 Lint:
 
 ```bash
-ruff check backend
+ruff check backend          # lint
+ruff format --check backend # formatting
+cd backend && mypy          # types (app/ only)
 ```
 
 ---
@@ -192,6 +195,7 @@ observe-insurance-voice-ai/
 │   ├── REQUIREMENTS-CHECKLIST.md # every CLAUDE.md requirement, with evidence
 │   ├── FAILURE-MATRIX.md        # generated from code; do not hand-edit
 │   ├── SECURITY-REVIEW.md       # secrets, logs, boundaries, injection, PII
+│   ├── CORE-COMPLETE.md         # the 25 mandatory requirements, verified
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
 │   ├── claim_guidance.json      # next steps + submission instructions
