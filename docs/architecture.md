@@ -53,6 +53,39 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 6
+
+**Keyword overlap, not embeddings.** Five documents do not need a vector
+database. Keyword matching is exact, instant, needs no dependency or model call
+in a live phone call, and a test that passes today passes tomorrow. Embeddings
+would buy recall we currently have no way to measure, in exchange for
+non-determinism in tests and a model call on the critical path of a phone call.
+Improving recall today is a one-line edit to a keyword list — no code change, no
+re-indexing.
+
+**One file per topic, with the disclaimer inside it.** Only each file's
+`## Answer` section is spoken, so the demo warning and the maintainer notes can
+live alongside the content they describe rather than in a separate register of
+caveats nobody reads. A test asserts the disclaimer never reaches a caller.
+
+**Confidence is reported, not just thresholded.** The agent gets HIGH / MEDIUM /
+LOW / NONE, and a medium match is spoken with a hedge rather than asserted. A
+band the agent can see is more useful than a boolean it cannot argue with — and
+it makes "how sure were we" answerable after the fact from the logs.
+
+**Ties break on keyword precision, not file order.** Two entries matching the
+same fraction of a question used to be resolved by directory listing, which
+moves when a file is renamed. Preferring the entry that used more of its own
+vocabulary picks the narrower topic, which is almost always the right one.
+
+**Required topics are checked at startup.** A missing `office_hours.md` fails
+the process. The alternative is finding out when a caller asks, which is the
+worst possible moment and the hardest to notice.
+
+**A retrieval failure is not "no answer".** "We don't cover that" and "our
+system is down" are different sentences, and neither may fall back to whatever
+the model remembers about opening hours.
+
 ## Decisions taken in Phase 5
 
 **One file knows the provider.** `integrations/voice_platform.py` translates

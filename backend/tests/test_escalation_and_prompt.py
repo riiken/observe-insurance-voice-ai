@@ -1,8 +1,7 @@
-"""FAQ answering, escalation records, and the system prompt."""
+"""Escalation records and the system prompt."""
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -10,113 +9,12 @@ import pytest
 from app.agents.prompt import PromptConfigurationError, load_system_prompt
 from app.models.enums import EscalationReason, EscalationStatus
 from app.services.escalation import EscalationService
-from app.services.faq import (
-    DEFAULT_FAQ_PATH,
-    FaqConfigurationError,
-    FaqOutcome,
-    FaqService,
-    load_faq_content,
-)
 from app.services.session_store import InMemorySessionStore
 from app.tools.base import ToolOutcome
-from app.tools.faq_tool import SearchFaqTool
 from app.tools.representative_tool import RequestRepresentativeTool
 from tests.session_fixtures import MARIA
 
 CALL = "call-1"
-
-
-@pytest.fixture
-def faq() -> FaqService:
-    return FaqService(load_faq_content())
-
-
-# --- FAQ: the four supported topics -------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("question", "expected"),
-    [
-        ("What are your office hours?", "office_hours"),
-        ("When are you open?", "office_hours"),
-        ("Are you open on Saturday?", "office_hours"),
-        ("What's your mailing address?", "mailing_address"),
-        ("Where do I post things?", "mailing_address"),
-        ("How do I start a new claim?", "start_a_claim"),
-        ("I want to file a claim", "start_a_claim"),
-        ("How does the claims process work?", "claims_process"),
-        ("What happens after I submit?", "claims_process"),
-        ("How do I upload documents?", "document_submission"),
-    ],
-)
-def test_supported_questions_are_answered(faq: FaqService, question: str, expected: str) -> None:
-    result = faq.search(question)
-
-    assert result.is_answered
-    assert result.entry is not None
-    assert result.entry.id == expected
-
-
-@pytest.mark.parametrize(
-    "question",
-    [
-        "What's the weather in Boston?",
-        "Can you sell me a car?",
-        "Am I covered for flood damage?",
-        "What's my premium?",
-        "Who is the CEO?",
-        "",
-        "   ",
-    ],
-)
-def test_unsupported_questions_are_not_answered(faq: FaqService, question: str) -> None:
-    """The agent should not hallucinate unsupported FAQ answers (CLAUDE.md §12)."""
-    assert faq.search(question).outcome is FaqOutcome.NO_ANSWER
-
-
-async def test_an_unanswerable_question_offers_a_representative(faq: FaqService) -> None:
-    result = await SearchFaqTool(faq)(CALL, "Am I covered for flood damage?")
-
-    assert result.outcome is ToolOutcome.NOT_FOUND
-    assert "representative" in result.speech
-    # It says what it *can* help with rather than just refusing.
-    assert "office hours" in result.speech.lower()
-
-
-async def test_an_answered_question_is_read_out_verbatim(faq: FaqService) -> None:
-    expected = faq.search("office hours").entry
-    assert expected is not None
-
-    result = await SearchFaqTool(faq)(CALL, "what are your office hours")
-
-    assert result.speech == expected.answer
-
-
-def test_faq_answers_contain_no_markup(faq: FaqService) -> None:
-    """Every answer is spoken aloud."""
-    for topic in faq.topics:
-        assert topic
-
-    content = load_faq_content()
-    for entry in content.entries:
-        for artefact in ("{", "}", "[", "]", "*", "#", "|", "\n-"):
-            assert artefact not in entry.answer
-
-
-def test_duplicate_faq_ids_are_rejected(tmp_path: Path) -> None:
-    payload = json.loads(DEFAULT_FAQ_PATH.read_text(encoding="utf-8"))
-    payload.pop("_comment", None)
-    payload["entries"].append(payload["entries"][0])
-    path = tmp_path / "faq.json"
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(FaqConfigurationError):
-        load_faq_content(path)
-
-
-def test_a_missing_faq_file_fails_loudly(tmp_path: Path) -> None:
-    with pytest.raises(FaqConfigurationError):
-        load_faq_content(tmp_path / "nope.json")
 
 
 # --- escalation ---------------------------------------------------------------

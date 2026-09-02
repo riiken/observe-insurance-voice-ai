@@ -7,10 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 5 complete — a real caller can hold a conversation.**
-> Vapi is wired to the backend: greeting, authentication, claim status, FAQ and
-> escalation all work over the webhook. Still to come: post-call interaction
-> records (Integration #2).
+> **Status: Phase 6 complete — FAQ knowledge base.**
+> Vapi is wired to the backend, and the supported general questions are now
+> answered from per-topic knowledge files with an explicit confidence
+> indicator. Still to come: post-call interaction records (Integration #2).
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -145,7 +145,7 @@ observe-insurance-voice-ai/
 │   │   │   ├── claims.py        #   claim access, gated on session state
 │   │   │   ├── conversation.py  #   call lifecycle, provider-neutral
 │   │   │   ├── escalation.py    #   escalation records
-│   │   │   ├── faq.py           #   deterministic FAQ matching
+│   │   │   ├── faq.py           #   knowledge loading + scored retrieval
 │   │   │   ├── guidance.py      #   configured claim guidance loader
 │   │   │   ├── voice.py         #   structured data -> natural speech
 │   │   │   └── container.py     #   service assembly
@@ -181,7 +181,11 @@ observe-insurance-voice-ai/
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
 │   ├── claim_guidance.json      # next steps + submission instructions
-│   └── faq.json                 # the supported general answers
+│   ├── office_hours.md          # one Markdown file per FAQ topic
+│   ├── mailing_address.md
+│   ├── new_claim.md
+│   ├── claims_process.md
+│   └── document_submission.md
 ├── scripts/seed_data/           # demo customer + claim CSVs
 ├── docker-compose.yml
 └── .env.example
@@ -480,10 +484,7 @@ those live in services and configured content, so a prompt that gets rewritten
 
 ### FAQ
 
-Answers come from [`knowledge/faq.json`](knowledge/faq.json) by deterministic
-keyword matching, not from the model. An answer either exists and is read out
-verbatim, or none exists and the caller is offered a representative. There is no
-middle path where something plausible gets composed.
+See [the knowledge base](#faq-knowledge-base) below.
 
 ### Emergencies
 
@@ -494,13 +495,79 @@ a claim while somebody is in danger.
 
 ---
 
+## FAQ knowledge base
+
+One Markdown file per topic in [`knowledge/`](knowledge/):
+
+| File | Topic | Answers, for example |
+| ---- | ----- | -------------------- |
+| `office_hours.md` | Office hours | "When are you open?", "Are you open Saturday?" |
+| `mailing_address.md` | Mailing address | "Where do I send a letter?" |
+| `new_claim.md` | Starting a new claim | "How do I report an accident?" |
+| `claims_process.md` | How the process works | "What happens after I submit?" |
+| `document_submission.md` | Sending documents in | "Can I email you photos?" |
+
+The first four are required; the service **refuses to start** without them.
+Better to fail on boot than to discover the gap when a caller asks.
+
+> **All of it is demo content.** Observe Insurance is fictional and the hours,
+> addresses and timescales are invented. Every file says so in its own header,
+> and `is_demo_content` rides along on the structured result.
+
+Only each file's `## Answer` section is read aloud — which is why the demo
+disclaimer can sit in the same file. A test asserts the disclaimer never reaches
+a caller's ear.
+
+### Retrieval
+
+Deterministic keyword overlap over five documents. **Not embeddings, and not a
+vector database** — for a corpus this size that would add recall we cannot
+currently measure, a dependency, and non-determinism in tests, in exchange for
+nothing a keyword list does not already do. Adding a phrasing a caller actually
+used is a one-line content edit, no code change and no re-indexing.
+
+Scoring is question coverage — what fraction of the caller's meaningful words an
+entry accounts for — with keyword precision as a tie-break, so a narrow topic
+beats a broad one that happens to share a word.
+
+### Confidence
+
+Every result carries a band, so the agent can hedge instead of asserting:
+
+| Confidence | Score | What happens |
+| ---------- | ----- | ------------ |
+| `HIGH` | ≥ 0.60 | The answer is read out as-is |
+| `MEDIUM` | ≥ 0.34 | The same answer, prefixed "I think this is what you're after." |
+| `LOW` | > 0 | **No answer.** Limitation stated, representative offered |
+| `NONE` | 0 | **No answer.** Same |
+
+The structured result carries `topic`, `answer`, `confidence`,
+`relevance_score`, `source` (the file it came from, so a surprising answer can
+be traced) and `matched_terms`.
+
+### When there is no answer
+
+`data` stays `None` — there is no half-populated object, no topic name for the
+agent to build a plausible reply around. The caller hears what we *can* help
+with, then an offer of a person:
+
+> That's not something I can help with, I'm afraid. I can cover office hours,
+> mailing address, starting a new claim… For anything else, I can put you
+> through to a representative — would you like me to do that?
+
+A **retrieval failure** is kept distinct from **no answer**: "we don't cover
+that" and "our system is down" are different sentences, and neither falls back
+to what the model happens to remember.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-532 tests, all deterministic and offline — no Google credentials, no network.
+573 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so
@@ -524,19 +591,19 @@ validation; and log shape and redaction.
 
 ## What is not built yet
 
-Phases 1–2 cover the foundation and the customer/claim data integration.
-Deliberately **not** implemented yet:
+Phases 1–6 cover the foundation, both the data integration and the voice
+platform, the authentication boundary, claims support and the FAQ knowledge
+base. Deliberately **not** implemented yet:
 
 - Integration #2: post-call interaction records (caller name, summary,
   sentiment, timestamp) written to an external system
 - Real call transfer — `request_representative` creates an escalation record and
   tells the caller, but does not hand the call to a Vapi transfer destination
 - Escalation records are held in memory rather than persisted
-- The voice platform webhook and any LLM orchestration
-- FAQ knowledge base content
-- Integration #2: post-call interaction persistence
-- Service-account auth for Sheets (an API key covers Phase 2's reads; writes
-  will need one)
+- Service-account auth for Sheets (an API key covers every read; writes will
+  need one)
+- A live phone call has not been placed — the webhook is exercised end to end
+  over HTTP with real Vapi payload shapes, but the last hop is manual
 
 Every deferral is tracked with a reason and a destination in
 [docs/DEFERRED.md](docs/DEFERRED.md). The full requirement set is in

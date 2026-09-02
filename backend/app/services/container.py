@@ -15,7 +15,7 @@ from app.services.authentication import AuthenticationService
 from app.services.claims import ClaimsService
 from app.services.conversation import ConversationService
 from app.services.escalation import EscalationService
-from app.services.faq import FaqService, load_faq_content
+from app.services.faq import FaqService, load_faq_entries
 from app.services.guidance import ClaimGuidance, load_claim_guidance
 from app.services.session_store import InMemorySessionStore, SessionStore
 from app.tools.authentication_tools import LookupCustomerTool, VerifyIdentityTool
@@ -45,7 +45,7 @@ def build_services(
     integration: DataIntegration,
     *,
     guidance_path: Path | None = None,
-    faq_path: Path | None = None,
+    faq_directory: Path | None = None,
     prompt_path: Path | None = None,
 ) -> ServiceContainer:
     """Wire the services and tools onto Integration #1.
@@ -65,7 +65,7 @@ def build_services(
     # All configured content is read here, at startup. Missing or incomplete
     # content fails the process rather than surfacing mid-call.
     guidance = load_claim_guidance(guidance_path)
-    faq = FaqService(load_faq_content(faq_path))
+    faq = FaqService(load_faq_entries(faq_directory))
     system_prompt = load_system_prompt(prompt_path)
 
     authentication = AuthenticationService(integration.customers, sessions)

@@ -170,7 +170,7 @@ Worth knowing before demoing:
 - **It will not read a claim to an unverified caller**, whatever the model asks
   for or the caller claims.
 - **It will not invent an answer.** FAQ replies come from
-  [`knowledge/faq.json`](../knowledge/faq.json), claim next-steps from
+  the per-topic files in [`knowledge/`](../knowledge/), claim next-steps from
   [`knowledge/claim_guidance.json`](../knowledge/claim_guidance.json). No match
   means an offer of a representative.
 - **It will not transfer a real call.** `request_representative` creates a

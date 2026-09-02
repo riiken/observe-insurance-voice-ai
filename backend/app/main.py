@@ -39,7 +39,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         build_services(
             integration,
             guidance_path=settings.claim_guidance_path,
-            faq_path=settings.faq_path,
+            faq_directory=settings.faq_directory,
             prompt_path=settings.system_prompt_path,
         )
         if integration is not None

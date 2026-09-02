@@ -58,8 +58,9 @@ class Settings(BaseSettings):
     # Configured claim guidance. None resolves to knowledge/claim_guidance.json
     # at the repository root; override to point at a different content set.
     claim_guidance_path: Path | None = None
-    # Supported FAQ answers. None resolves to knowledge/faq.json.
-    faq_path: Path | None = None
+    # Directory of FAQ knowledge files (one Markdown file per topic).
+    # None resolves to knowledge/ at the repository root.
+    faq_directory: Path | None = None
     # The agent's system prompt. None resolves to the file shipped with the app.
     system_prompt_path: Path | None = None
 
