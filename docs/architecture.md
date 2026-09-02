@@ -53,6 +53,41 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 3
+
+**The session is the authorization boundary, and it is frozen.** `SessionState`
+is an immutable dataclass; every change goes through a named transition that
+requires a real result from the customer repository. `authenticated = True` is
+not an available move — not for a caller, not for the model, and not for a
+future contributor working late. The defence is structural rather than a rule
+someone has to remember.
+
+**The session never crosses the wire.** It lives server-side keyed by `call_id`,
+and nothing from a tool call or model response is deserialised into it. The
+worst input a caller can supply is a phone number and a verification value,
+which is exactly what the flow is built to receive.
+
+**Claim access takes a `call_id` and nothing else.** No `customer_id`, no
+`authenticated` flag, no override parameter. `require_authenticated` reads the
+customer id off the session and returns it, so an operation cannot be aimed at a
+record the session did not authenticate as. "Tell me the claim for CUST-1001"
+has no argument to travel in. A test asserts the signature.
+
+**One gate, not one check per operation.** Every claim operation passes through
+`require_authenticated`. A per-operation check would be a per-operation chance to
+drift; one function is one thing to audit. Its denial message is identical for
+every unauthorised state, so probing reveals nothing about which step failed.
+
+**Three failure kinds, three responses.** Wrong answer: costs an attempt. No
+matching record: costs nothing, because nothing was checked — the caller stays
+UNAUTHENTICATED rather than being told they failed. Upstream failure: costs
+nothing and does not end the call, because it is our fault. Collapsing these
+would either punish callers for our outages or let guessing run unbounded.
+
+**Authorization is checked before the repository is touched.** An unauthorised
+request causes no lookup, so nothing is fetched that could then leak through a
+log line or a timing difference.
+
 ## Decisions taken in Phase 2
 
 **Repositories, not a Sheets client, are what business logic sees.** Services
@@ -131,9 +166,9 @@ built against one budget rather than inventing its own.
 
 | Phase | Work | Lands in |
 | ----- | ---- | -------- |
-| 3 | Session state, authentication boundary, claim access | `services/`, `models/` |
-| 3 | `lookup_customer`, `verify_identity`, `get_claim_status`, `search_faq`, `request_representative`, `complete_call` | `tools/` |
-| 3 | FAQ content, kept out of the prompt | `knowledge/` |
+| ~~3~~ | ~~Session state, authentication boundary, claim access~~ | ~~`services/`~~ — done |
+| 4 | `lookup_customer`, `verify_identity`, `get_claim_status`, `search_faq`, `request_representative`, `complete_call` | `tools/` |
+| 4 | FAQ content, kept out of the prompt | `knowledge/` |
 | 4 | Prompts, turn handling, escalation and emergency routing | `agents/` |
 | 4 | Voice platform webhook | `api/v1/` |
 | ~~2~~ | ~~Customer/claim retrieval~~ | ~~`integrations/`~~ — done |

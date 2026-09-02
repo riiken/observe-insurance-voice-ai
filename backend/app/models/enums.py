@@ -14,13 +14,29 @@ class AuthenticationStatus(StrEnum):
     """Explicit session authentication state — the authorization source of truth.
 
     Authorization is decided by this value alone, never by what the model
-    believes about the conversation.
+    believes about the conversation. Nothing a caller says and nothing the model
+    infers can move the session between these states: only a real verification
+    result from the customer repository can.
+
+    States, and what each one means for claim access:
+
+    - `UNAUTHENTICATED` — start of call, and where a caller stays when no
+      customer matched their number. Explicitly *not* the same as
+      `AUTHENTICATION_FAILED`: we have no record to check against, so nothing
+      has been got wrong yet and the caller has spent no attempts.
+    - `CUSTOMER_FOUND` — a record matched the number. Identity is claimed, not
+      proven; discloses nothing.
+    - `VERIFYING` — a verification value is being checked upstream.
+    - `AUTHENTICATED` — terminal, and the only state that authorises claim
+      access.
+    - `AUTHENTICATION_FAILED` — terminal. The attempt budget is spent.
     """
 
     UNAUTHENTICATED = "UNAUTHENTICATED"
-    PENDING = "PENDING"
+    CUSTOMER_FOUND = "CUSTOMER_FOUND"
+    VERIFYING = "VERIFYING"
     AUTHENTICATED = "AUTHENTICATED"
-    FAILED = "FAILED"
+    AUTHENTICATION_FAILED = "AUTHENTICATION_FAILED"
 
 
 class CustomerLookupOutcome(StrEnum):

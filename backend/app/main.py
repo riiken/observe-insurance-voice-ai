@@ -19,6 +19,7 @@ from app.core.logging import configure_logging, event, get_logger
 from app.core.middleware import register_middleware
 from app.integrations.factory import build_data_integration
 from app.integrations.registry import clear_dependencies, registered_dependencies
+from app.services.container import build_services
 
 log = get_logger(__name__)
 
@@ -29,7 +30,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # Built here rather than at import time so nothing reaches the network
     # until the process is actually starting.
-    app.state.data_integration = build_data_integration(settings)
+    integration = build_data_integration(settings)
+    app.state.data_integration = integration
+    # No data integration means no service layer: a claims service that cannot
+    # read a claim has nothing to offer, so the API reports it unavailable
+    # rather than pretending.
+    app.state.services = build_services(integration) if integration is not None else None
 
     log.info(
         "app.started",
@@ -44,6 +50,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         if app.state.data_integration is not None:
             await app.state.data_integration.aclose()
+        app.state.services = None
         clear_dependencies()
         log.info("app.stopped")
 
@@ -65,6 +72,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.settings = settings
     app.state.data_integration = None
+    app.state.services = None
 
     register_middleware(app)
     register_exception_handlers(app)
