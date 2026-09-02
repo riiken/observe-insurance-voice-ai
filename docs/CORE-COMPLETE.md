@@ -7,8 +7,8 @@ assessment. No new features; defects found were fixed.
 | ---- | ------ |
 | `ruff check` | **PASS** |
 | `ruff format --check` | **PASS** (111 files) |
-| `mypy` (app/) | **PASS** (72 files) |
-| `pytest` | **PASS** — 818 tests, deterministic, no credentials, no network |
+| `mypy` (app/) | **PASS** (73 files) |
+| `pytest` | **PASS** — 845 tests, deterministic, no credentials, no network |
 | Docker build + run, fully configured | **PASS** — healthy, `/ready` green on all three dependencies |
 | Full call through the container | **PASS** — real OAuth exchange, row written to the external sheet |
 
@@ -110,7 +110,7 @@ silence timeout closes idle calls instead.
 ## Status
 
 **Core complete.** All 25 mandatory requirements implemented, verified offline
-by 821 tests and four gates, and demonstrated live by voice.
+by 845 tests and four gates, and demonstrated live by voice.
 
 Remaining limitations are recorded with their reasoning in
 [DEFERRED.md](DEFERRED.md) and summarised in

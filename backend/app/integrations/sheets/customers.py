@@ -54,18 +54,8 @@ class GoogleSheetsCustomerRepository:
         if normalised is None:
             # Nothing was wrong upstream and nothing is missing from the sheet;
             # we simply were not given a phone number.
-            log.info(
-                events.CUSTOMER_LOOKUP_COMPLETED,
-                extra=event(
-                    outcome="CUSTOMER_NOT_FOUND",
-                    reason="INVALID_PHONE_NUMBER",
-                    success=False,
-                    duration_ms=0.0,
-                ),
-            )
             return CustomerLookupResult.not_found(FailureReason.INVALID_PHONE_NUMBER)
 
-        log.info(events.CUSTOMER_LOOKUP_STARTED, extra=event(caller_phone=normalised))
         started = time.perf_counter()
         try:
             rows = await self._load_rows()
@@ -75,29 +65,17 @@ class GoogleSheetsCustomerRepository:
         match = next((row for row in rows if row.phone_number == normalised), None)
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
 
-        if match is None:
-            log.info(
-                events.CUSTOMER_LOOKUP_COMPLETED,
-                extra=event(
-                    outcome="CUSTOMER_NOT_FOUND",
-                    reason="NO_MATCHING_RECORD",
-                    caller_phone=normalised,
-                    duration_ms=duration_ms,
-                    success=True,  # the lookup worked; the answer is "no record"
-                ),
-            )
-            return CustomerLookupResult.not_found()
-
-        log.info(
-            events.CUSTOMER_LOOKUP_COMPLETED,
-            extra=event(
-                outcome="CUSTOMER_FOUND",
-                customer_id=match.customer_id,
-                caller_phone=normalised,
-                duration_ms=duration_ms,
-                success=True,
-            ),
+        # Domain events are emitted once, by AuthenticationService: it is the
+        # layer that has the call_id and makes the decision. Two emitters of one
+        # event name means two shapes of the same record and a dashboard that
+        # silently doubles every count. This layer's own I/O is `sheets.fetch`.
+        log.debug(
+            "sheets.customer_scan",
+            extra=event(rows=len(rows), matched=match is not None, duration_ms=duration_ms),
         )
+
+        if match is None:
+            return CustomerLookupResult.not_found()
         return CustomerLookupResult.found(match.to_customer())
 
     async def verify_customer(
@@ -178,14 +156,10 @@ class GoogleSheetsCustomerRepository:
 
     @staticmethod
     def _lookup_failure(exc: IntegrationError, *, phone: str) -> CustomerLookupResult:
-        log.error(
-            events.CUSTOMER_LOOKUP_COMPLETED,
-            extra=event(
-                outcome="INTEGRATION_ERROR",
-                error_code=exc.code,
-                caller_phone=phone,
-                success=False,
-            ),
+        """The service logs the domain outcome; this records the cause."""
+        log.warning(
+            "sheets.customer_scan_failed",
+            extra=event(error_code=exc.code, caller_phone=phone),
         )
         return CustomerLookupResult.integration_error(failure_reason(exc))
 

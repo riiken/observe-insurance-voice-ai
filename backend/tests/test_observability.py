@@ -394,3 +394,33 @@ def test_metrics_hold_nothing_per_call(caller: Caller) -> None:
     # A handful of keys regardless of how many calls went through.
     assert len(snapshot["counters"]) < 15
     assert len(snapshot["latencies"]) < 15
+
+
+def test_each_domain_event_has_exactly_one_emitter(caller: Caller) -> None:
+    """Two emitters of one event name means two shapes of the same record — and
+    a dashboard that silently doubles every count.
+
+    `customer.lookup.started` was emitted by both the service and the Sheets
+    adapter, so every lookup was counted twice by anything reading the logs.
+    """
+    buffer = io.StringIO()
+    configure_logging(level="DEBUG", log_format="json", stream=buffer)
+    try:
+        caller.dials()
+        caller.gives_phone(MARIA_PHONE)
+        caller.gives_verification(MARIA_DOB)
+        caller.asks_about_claim()
+        caller.hangs_up()
+    finally:
+        configure_logging(level="INFO", log_format="console", stream=io.StringIO())
+
+    names = [json.loads(line)["event"] for line in buffer.getvalue().splitlines() if line.strip()]
+
+    for once_only in (
+        events.CALL_STARTED,
+        events.CUSTOMER_LOOKUP_STARTED,
+        events.CUSTOMER_LOOKUP_COMPLETED,
+        events.AUTHENTICATION_SUCCESS,
+        events.CALL_COMPLETED,
+    ):
+        assert names.count(once_only) == 1, f"{once_only} emitted {names.count(once_only)}x"
