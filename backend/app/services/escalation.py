@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import uuid
 from collections import deque
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from app.core import events
@@ -134,14 +134,6 @@ class EscalationService:
             ),
         )
         return record
-
-    async def mark_failed(self, record: EscalationRecord) -> EscalationRecord:
-        """Record that a transfer we attempted did not happen."""
-        log.error(
-            "escalation.failed",
-            extra=event(escalation_id=record.escalation_id, call_id=record.call_id),
-        )
-        return replace(record, status=EscalationStatus.FAILED)
 
     def records_for(self, call_id: str) -> list[EscalationRecord]:
         return [record for record in self._records if record.call_id == call_id]

@@ -39,7 +39,9 @@ log = get_logger(__name__)
 async def voice_webhook(
     request: Request,
     settings: SettingsDep,
-    x_vapi_secret: Annotated[str | None, Header(alias=SECRET_HEADER)] = None,
+    # Named for the role, not the vendor: the header itself comes from
+    # SECRET_HEADER, so only the adapter knows which platform this is.
+    platform_secret: Annotated[str | None, Header(alias=SECRET_HEADER)] = None,
 ) -> JSONResponse:
     """Receive every event for a call: start, tool calls, completion.
 
@@ -48,7 +50,7 @@ async def voice_webhook(
     would let an unauthenticated caller learn whether the integration is
     configured, by telling 503 apart from 401.
     """
-    if not verify_secret(x_vapi_secret, settings.secret(settings.voice_platform_api_key)):
+    if not verify_secret(platform_secret, settings.secret(settings.voice_platform_api_key)):
         # Deliberately terse: an unauthenticated caller learns nothing about
         # what a valid request looks like.
         log.warning("voice.webhook_rejected", extra=event(platform=PLATFORM_NAME))

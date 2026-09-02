@@ -394,9 +394,3 @@ def is_infrastructure_failure(code: str) -> bool:
     """
     mode = classify(code)
     return mode is not None and mode.is_infrastructure
-
-
-def codes_by_class(failure_class: FailureClass) -> list[str]:
-    return sorted(
-        code for code, mode in FAILURE_CATALOGUE.items() if mode.failure_class is failure_class
-    )

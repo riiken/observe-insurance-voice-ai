@@ -1,7 +1,7 @@
 # Observe Insurance — VoiceAI Claims Support Agent
 
 > **Status: complete.** All 25 mandatory requirements implemented, verified by
-> 845 offline tests, and demonstrated live over a real voice call. Both bonus
+> 843 offline tests, and demonstrated live over a real voice call. Both bonus
 > features are done.
 
 ---
@@ -127,7 +127,7 @@ argument: `ConversationService(supervisor=None)`, tested.
 | Pydantic v2 / pydantic-settings | | Config validated at startup, not first use |
 | httpx | | One async HTTP client for every outbound call |
 | google-auth | | Service-account signing only — writes need it, API keys cannot write |
-| pytest · ruff · mypy | dev | 845 tests, lint, format, types |
+| pytest · ruff · mypy | dev | 843 tests, lint, format, types |
 
 Five runtime dependencies. No Redis, no Kafka, no Celery, no vector database,
 no ORM. Each was considered and left out — see [§10](#10--production-considerations).
@@ -261,7 +261,7 @@ contract for the load balancer, and must not move when the API version does.
 ## 8 · How to test
 
 ```bash
-pytest backend/tests            # 845 tests
+pytest backend/tests            # 843 tests
 ruff check backend scripts      # lint
 ruff format --check backend scripts
 cd backend && mypy              # types (app/ only)

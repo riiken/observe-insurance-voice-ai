@@ -47,28 +47,6 @@ def render_claim_status(claim: Claim, guidance: ClaimGuidance) -> str:
     return " ".join(sentences)
 
 
-def render_submission_instructions(guidance: ClaimGuidance, claim: Claim) -> str:
-    """Explain how to send documents in, using only configured detail.
-
-    Offered as a follow-up rather than bundled into the status line: a caller
-    who has just been told what is missing is not ready for an address in the
-    same breath.
-    """
-    submission = guidance.submission
-    return (
-        f"You can upload them at {submission.portal_url}, "
-        f"or email them to {_speak_email(submission.email)}. "
-        f"Whichever you choose, {submission.reference_instruction} — "
-        f"your claim number is {speak_reference(claim.claim_id)}. "
-        f"{submission.turnaround}"
-    )
-
-
-def render_mailing_address(guidance: ClaimGuidance) -> str:
-    """The postal option, for a caller who cannot use the portal or email."""
-    return f"You can post them to {guidance.submission.mailing_address}."
-
-
 def _document_sentences(claim: Claim, guidance: ClaimGuidance) -> list[str]:
     documents = list(claim.required_documents)
 
@@ -165,8 +143,6 @@ def _lowercase_first(text: str) -> str:
 
 __all__ = [
     "render_claim_status",
-    "render_mailing_address",
-    "render_submission_instructions",
     "speak_date",
     "speak_list",
     "speak_reference",

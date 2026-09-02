@@ -39,7 +39,13 @@ persistence.
 | `core`         | —                                 | Config, logging, context, errors, middleware. |
 
 Dependencies point one way, downward. A service never imports an agent; an
-integration never imports a service.
+integration never imports a service. Where a service needs something the agent
+layer provides — the supervisor's dispatch — it declares a Protocol and the
+agent satisfies it, so the arrow still points down.
+
+The one deliberate exception is `services/container.py`, the composition root.
+Wiring everything together means importing everything, and pushing that
+knowledge outwards would only move the same import list somewhere less obvious.
 
 ### Why this shape
 

@@ -13,8 +13,8 @@ being a parameter the model can choose.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any, Protocol, runtime_checkable
 
-from app.agents.specialists import Supervisor
 from app.core import events
 from app.core.context import reset_call_id, set_call_id
 from app.core.logging import event, get_logger
@@ -25,9 +25,25 @@ from app.models.session import SessionState
 from app.services.authentication import AuthenticationService
 from app.services.postcall import PostCallService
 from app.services.session_store import SessionStore
+from app.tools.base import ToolResult
 from app.tools.registry import ToolRegistry
 
 log = get_logger(__name__)
+
+
+@runtime_checkable
+class Dispatcher(Protocol):
+    """Something that can route a tool call and run it.
+
+    Declared here rather than imported from `agents/` on purpose: the layering
+    is services -> integrations -> core, and a service reaching *up* into the
+    agent layer would invert it. The supervisor satisfies this structurally, so
+    the orchestration layer depends on the service rather than the reverse.
+    """
+
+    async def dispatch(
+        self, tool_name: str, call_id: str, arguments: dict[str, Any]
+    ) -> tuple[ToolResult, Any]: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,7 +69,7 @@ class ConversationService:
         sessions: SessionStore,
         tools: ToolRegistry,
         postcall: PostCallService,
-        supervisor: Supervisor | None = None,
+        supervisor: Dispatcher | None = None,
     ) -> None:
         self._authentication = authentication
         self._sessions = sessions

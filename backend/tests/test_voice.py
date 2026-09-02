@@ -16,8 +16,6 @@ from app.models.enums import ClaimStatus
 from app.services.guidance import ClaimGuidance, load_claim_guidance
 from app.services.voice import (
     render_claim_status,
-    render_mailing_address,
-    render_submission_instructions,
     speak_date,
     speak_list,
     speak_reference,
@@ -162,18 +160,6 @@ def test_an_empty_document_list_admits_the_gap_instead_of_inventing(
     assert "representative" in speech.lower()
     for invented in ("police report", "repair estimate", "receipt", "photograph"):
         assert invented not in speech.lower()
-
-
-def test_submission_instructions_come_from_configuration(guidance: ClaimGuidance) -> None:
-    speech = render_submission_instructions(guidance, _claim(ClaimStatus.DOCUMENTS_REQUIRED))
-
-    assert guidance.submission.portal_url in speech
-    assert "documents at observeinsurance.com" in speech  # spoken, not typed
-    assert "CLM 88402" in speech  # spaced so it can be written down
-
-
-def test_the_mailing_address_is_the_configured_one(guidance: ClaimGuidance) -> None:
-    assert guidance.submission.mailing_address in render_mailing_address(guidance)
 
 
 # --- helpers ------------------------------------------------------------------

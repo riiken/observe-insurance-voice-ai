@@ -21,9 +21,6 @@ leak PII and does not grow with call volume.
 from __future__ import annotations
 
 import threading
-import time
-from collections.abc import Iterator
-from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -80,14 +77,6 @@ class MetricsRegistry:
         key = _key(name, labels)
         with self._lock:
             self._latencies.setdefault(key, LatencySummary()).observe(duration_ms)
-
-    @contextmanager
-    def timer(self, name: str, **labels: str) -> Iterator[None]:
-        started = time.perf_counter()
-        try:
-            yield
-        finally:
-            self.observe(name, (time.perf_counter() - started) * 1000, **labels)
 
     # --- reading ----------------------------------------------------------
 
