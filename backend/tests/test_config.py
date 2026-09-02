@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
@@ -70,3 +72,66 @@ def test_production_starts_once_the_secret_is_set(environment: str) -> None:
 def test_local_development_does_not_need_a_webhook_secret() -> None:
     """Requiring one locally would mean nobody could run the service to look at it."""
     assert _settings(environment="local").voice_platform_api_key is None
+
+
+# --- loading from an actual .env file -----------------------------------------
+
+
+def test_blank_values_in_an_env_file_mean_unset(tmp_path: Path) -> None:
+    """`cp .env.example .env` is the documented first step, and it ships every
+    optional setting as `KEY=` with nothing after it.
+
+    Without this, pydantic reads the empty string as a value:
+    `CLAIM_GUIDANCE_PATH=` became `Path("")` — which is `Path(".")` — and
+    startup died trying to read the working directory as a JSON file.
+    """
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "\n".join(
+            [
+                "APP_NAME=",
+                "CLAIM_GUIDANCE_PATH=",
+                "FAQ_DIRECTORY=",
+                "SYSTEM_PROMPT_PATH=",
+                "GOOGLE_SHEETS_API_KEY=",
+                "GOOGLE_SHEETS_SPREADSHEET_ID=",
+                "VOICE_PLATFORM_API_KEY=",
+                "VOICE_TRANSFER_PHONE_NUMBER=",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.claim_guidance_path is None
+    assert settings.faq_directory is None
+    assert settings.system_prompt_path is None
+    assert settings.google_sheets_api_key is None
+    assert settings.voice_platform_api_key is None
+    assert settings.app_name == "observe-insurance-voice-ai"  # default, not ""
+    assert settings.sheets_configured is False
+
+
+def test_the_shipped_env_example_produces_a_startable_service(tmp_path: Path) -> None:
+    """The exact file a developer is told to copy must not break startup."""
+    example = Path(__file__).resolve().parents[2] / ".env.example"
+    env_file = tmp_path / ".env"
+    env_file.write_text(example.read_text(encoding="utf-8"), encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)
+
+    # These three feed file loads at startup; a stray Path(".") kills the process.
+    assert settings.claim_guidance_path is None
+    assert settings.faq_directory is None
+    assert settings.system_prompt_path is None
+
+
+def test_a_populated_env_file_is_still_read(tmp_path: Path) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("APP_NAME=custom\nLOG_LEVEL=warning\n", encoding="utf-8")
+
+    settings = Settings(_env_file=env_file)
+
+    assert settings.app_name == "custom"
+    assert settings.log_level == "WARNING"

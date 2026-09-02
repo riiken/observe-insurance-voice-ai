@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -110,6 +110,29 @@ class Settings(BaseSettings):
     # escalation record then says REQUESTED rather than claiming a transfer we
     # did not perform.
     voice_transfer_phone_number: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _blank_means_unset(cls, values: Any) -> Any:
+        """Drop blank values so the field default applies.
+
+        `.env.example` documents every setting, including optional ones, as
+        `KEY=` with nothing after it — and copying it to `.env` is the
+        documented first step. Without this, pydantic reads that empty string
+        as a *value*: `CLAIM_GUIDANCE_PATH=` became `Path("")`, which is
+        `Path(".")`, and startup died trying to read the working directory as a
+        JSON file.
+
+        Blank in a `.env` means "I have not set this". Removing the key here is
+        what makes it behave that way.
+        """
+        if isinstance(values, dict):
+            return {
+                key: value
+                for key, value in values.items()
+                if not (isinstance(value, str) and not value.strip())
+            }
+        return values
 
     @field_validator("log_level")
     @classmethod
