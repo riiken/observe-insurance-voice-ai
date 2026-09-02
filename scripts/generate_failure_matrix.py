@@ -16,7 +16,7 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "backend"))
 
-from app.core.failures import FAILURE_CATALOGUE, FailureClass  # noqa: E402
+from app.core.failures import FAILURE_CATALOGUE, FailureClass
 
 _CLASS_NOTES = {
     FailureClass.TRANSIENT_UPSTREAM: "A dependency is briefly unwell. Retry.",
@@ -47,23 +47,33 @@ def render() -> str:
     lines = [
         "# Failure matrix",
         "",
-        "**Generated from "
-        "[`app/core/failures.py`](../backend/app/core/failures.py) — do not edit "
-        "by hand.** Regenerate with `python scripts/generate_failure_matrix.py`.",
+        (
+            "**Generated from "
+            "[`app/core/failures.py`](../backend/app/core/failures.py) — do not "
+            "edit by hand.** Regenerate with "
+            "`python scripts/generate_failure_matrix.py`."
+        ),
         "",
-        "A test asserts that every error code the system defines appears in the "
-        "catalogue, so a new failure mode cannot ship without a decision about "
-        "how it is handled.",
+        (
+            "A test asserts that every error code the system defines appears in "
+            "the catalogue, so a new failure mode cannot ship without a decision "
+            "about how it is handled."
+        ),
         "",
-        "The distinction the whole matrix is arranged around: **an "
-        "infrastructure failure is never a business outcome.** A Google Sheets "
-        "timeout is not a customer who does not exist, and the two never share "
-        "a classification, a log level, or a sentence to a caller.",
+        (
+            "The distinction the whole matrix is arranged around: **an "
+            "infrastructure failure is never a business outcome.** A Google "
+            "Sheets timeout is not a customer who does not exist, and the two "
+            "never share a classification, a log level, or a sentence to a "
+            "caller."
+        ),
         "",
     ]
 
     for failure_class in FailureClass:
-        modes = [m for m in FAILURE_CATALOGUE.values() if m.failure_class is failure_class]
+        modes = [
+            m for m in FAILURE_CATALOGUE.values() if m.failure_class is failure_class
+        ]
         if not modes:
             continue
 
@@ -90,29 +100,44 @@ def render() -> str:
         "",
         "| | Value | Why |",
         "| --- | --- | --- |",
-        "| Per-attempt timeout, in call | `HTTP_TIMEOUT_SECONDS` (10s) | One "
-        "Sheets read |",
-        "| **Total budget, in call** | `VOICE_TURN_BUDGET_SECONDS` (6s) | A "
-        "caller is listening to silence. Three attempts at ten seconds is thirty "
-        "seconds of nothing, by which point retrying is pointless — they have "
-        "gone. Failing fast leaves time to apologise and offer a person. |",
-        "| Per-attempt timeout, post-call | `POSTCALL_TIMEOUT_SECONDS` (20s) | "
-        "Nobody is waiting, so it may take longer |",
+        (
+            "| Per-attempt timeout, in call | `HTTP_TIMEOUT_SECONDS` (10s) | One "
+            "Sheets read |"
+        ),
+        (
+            "| **Total budget, in call** | `VOICE_TURN_BUDGET_SECONDS` (6s) | A "
+            "caller is listening to silence. Three attempts at ten seconds is "
+            "thirty seconds of nothing, by which point retrying is pointless — "
+            "they have gone. Failing fast leaves time to apologise and offer a "
+            "person. |"
+        ),
+        (
+            "| Per-attempt timeout, post-call | `POSTCALL_TIMEOUT_SECONDS` (20s) "
+            "| Nobody is waiting, so it may take longer |"
+        ),
         "| Attempts | `HTTP_MAX_RETRIES` (2) | Bounded |",
-        "| Backoff | `HTTP_BACKOFF_BASE_SECONDS` (0.2s), exponential, **full "
-        "jitter**, capped at 5s | Without jitter, every concurrent call hitting "
-        "the same rate limit retries in lockstep and recreates the burst |",
+        (
+            "| Backoff | `HTTP_BACKOFF_BASE_SECONDS` (0.2s), exponential, **full "
+            "jitter**, capped at 5s | Without jitter, every concurrent call "
+            "hitting the same rate limit retries in lockstep and recreates the "
+            "burst |"
+        ),
         "",
         "## What a caller never hears",
         "",
-        "Asserted for every failure branch in "
-        "[`test_failure_handling.py`](../backend/tests/test_failure_handling.py):",
+        (
+            "Asserted for every failure branch in "
+            "[`test_failure_handling.py`]"
+            "(../backend/tests/test_failure_handling.py):"
+        ),
         "",
         "- HTTP status codes, ours or an upstream's",
         "- The words *Google*, *sheet*, *spreadsheet*, or any library name",
         "- Stack traces, exception names, `None`, or JSON punctuation",
-        "- Which specific check refused them — every authorization refusal is "
-        "worded identically, so probing reveals nothing",
+        (
+            "- Which specific check refused them — every authorization refusal "
+            "is worded identically, so probing reveals nothing"
+        ),
         "",
     ]
     return "\n".join(lines)
@@ -121,4 +146,6 @@ def render() -> str:
 if __name__ == "__main__":
     output = REPO_ROOT / "docs" / "FAILURE-MATRIX.md"
     output.write_text(render(), encoding="utf-8")
-    print(f"wrote {output.relative_to(REPO_ROOT)} ({len(FAILURE_CATALOGUE)} failure modes)")
+    print(
+        f"wrote {output.relative_to(REPO_ROOT)} ({len(FAILURE_CATALOGUE)} failure modes)"
+    )
