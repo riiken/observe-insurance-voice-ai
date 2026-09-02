@@ -1,7 +1,9 @@
 services:
   api:
     build:
-      context: ./backend
+      # Repo root: the image needs backend/app and knowledge/ together.
+      context: .
+      dockerfile: backend/Dockerfile
     image: observe-insurance-voice-ai:local
     ports:
       - "8000:8000"

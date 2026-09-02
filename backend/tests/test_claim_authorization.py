@@ -236,15 +236,17 @@ async def test_injection_still_spends_the_attempt_budget(
         await claims.get_claim_status(CALL)
 
 
-def test_claim_access_takes_no_argument_that_could_carry_an_identity() -> None:
-    """The structural defence: there is no parameter for injection to travel in.
+def test_claim_access_takes_no_argument_that_could_choose_an_identity() -> None:
+    """The structural defence: no parameter can select which record is returned.
 
-    `get_claim_status(call_id)` and nothing else — no customer_id, no
-    authenticated flag, no override. The customer id is read off the session.
+    `expected_customer_id` is an assertion that gets checked and refused on
+    mismatch, never a selector. There is no authenticated flag and no override,
+    so the customer is always the one the session verified as.
     """
     parameters = set(inspect.signature(ClaimsService.get_claim_status).parameters)
 
-    assert parameters == {"self", "call_id"}
+    assert parameters == {"self", "call_id", "expected_customer_id"}
+    assert not {"authenticated", "override", "customer_id", "skip_auth"} & parameters
 
 
 def test_the_authorization_guard_has_no_override_parameter() -> None:

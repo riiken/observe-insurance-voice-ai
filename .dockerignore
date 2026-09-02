@@ -2,9 +2,12 @@
 **/*.py[cod]
 **/*.egg-info/
 .venv/
+.git/
 .pytest_cache/
 .ruff_cache/
-tests/
+backend/tests/
 .env
 .env.*
 !.env.example
+docs/
+scripts/

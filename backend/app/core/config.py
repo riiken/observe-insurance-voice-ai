@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, field_validator
@@ -52,6 +53,11 @@ class Settings(BaseSettings):
     google_sheets_base_url: str = "https://sheets.googleapis.com/v4/spreadsheets"
     sheets_customers_range: str = "Customers!A:D"
     sheets_claims_range: str = "Claims!A:E"
+
+    # --- Knowledge ---------------------------------------------------------
+    # Configured claim guidance. None resolves to knowledge/claim_guidance.json
+    # at the repository root; override to point at a different content set.
+    claim_guidance_path: Path | None = None
 
     # --- Telephony ---------------------------------------------------------
     # Applied to national-format numbers a caller reads out without a country code.

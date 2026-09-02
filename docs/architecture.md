@@ -53,6 +53,40 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 4
+
+**Authentication is enforced at two layers, and only one can say yes.** The
+service raises `AuthorizationError`; the tool catches it and returns a spoken
+refusal. Defence in depth without ambiguity: the tool can phrase a decision, it
+cannot make one, so a future change to the tool cannot loosen the boundary.
+
+**A tool returns failures, it does not raise them.** An unauthenticated caller,
+a missing claim and an unreachable spreadsheet all come back as outcomes the
+agent can speak. None of them should end a phone call, so none of them is an
+exception at this layer.
+
+**`data` is None on every non-success outcome.** A failed call has nothing in it
+to read out by mistake and no half-populated object to mine. The failure lines
+are fixed strings containing no status words, so "never hallucinate claim
+information" is a property of the type, not a hope about the model.
+
+**Everything the agent says about next steps is configured.** `next_step` and
+the submission instructions come from `knowledge/claim_guidance.json`. There is
+no code path that composes advice, so "do not invent submission procedures"
+cannot be violated by a well-meaning edit. Startup validates that every
+`ClaimStatus` is covered — a missing one fails the process rather than surfacing
+mid-call.
+
+**The voice layer is a function, not a prompt.** Rendering speech in Python
+makes "how it sounds" testable: sentence shape, one question at a time, no
+markdown, no promises about approval or payment timing. Leaving the model to
+compose a line from a JSON blob would make every one of those a hope.
+
+**`customer_id` narrows, it never selects.** The tool accepts one so an agent
+can be explicit, but it is compared against the session's authenticated customer
+and refused on mismatch — before any lookup. An argument that can only be
+checked cannot be an injection vector.
+
 ## Decisions taken in Phase 3
 
 **The session is the authorization boundary, and it is frozen.** `SessionState`
@@ -167,10 +201,11 @@ built against one budget rather than inventing its own.
 | Phase | Work | Lands in |
 | ----- | ---- | -------- |
 | ~~3~~ | ~~Session state, authentication boundary, claim access~~ | ~~`services/`~~ — done |
-| 4 | `lookup_customer`, `verify_identity`, `get_claim_status`, `search_faq`, `request_representative`, `complete_call` | `tools/` |
-| 4 | FAQ content, kept out of the prompt | `knowledge/` |
-| 4 | Prompts, turn handling, escalation and emergency routing | `agents/` |
-| 4 | Voice platform webhook | `api/v1/` |
+| ~~4~~ | ~~`get_claim_status`, and the voice response layer~~ | ~~`tools/`~~ — done |
+| 5 | `lookup_customer`, `verify_identity`, `search_faq`, `request_representative`, `complete_call` | `tools/` |
+| 5 | FAQ content, kept out of the prompt | `knowledge/` |
+| 5 | Prompts, turn handling, escalation and emergency routing | `agents/` |
+| 5 | Voice platform webhook | `api/v1/` |
 | ~~2~~ | ~~Customer/claim retrieval~~ | ~~`integrations/`~~ — done |
 | ~~2~~ | ~~Retry-with-backoff helper, dependency registration for readiness~~ | ~~`core/`~~ — done |
 | 5 | Post-call interaction persistence (Integration #2) | `integrations/` |

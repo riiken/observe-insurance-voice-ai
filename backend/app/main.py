@@ -35,7 +35,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # No data integration means no service layer: a claims service that cannot
     # read a claim has nothing to offer, so the API reports it unavailable
     # rather than pretending.
-    app.state.services = build_services(integration) if integration is not None else None
+    app.state.services = (
+        build_services(integration, guidance_path=settings.claim_guidance_path)
+        if integration is not None
+        else None
+    )
 
     log.info(
         "app.started",

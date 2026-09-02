@@ -20,6 +20,7 @@ from app.core.errors import ServiceUnavailableError
 from app.services.authentication import AuthenticationService
 from app.services.claims import ClaimsService
 from app.services.container import ServiceContainer
+from app.tools.claim_status import ClaimStatusTool
 
 
 def get_app_settings(request: Request) -> Settings:
@@ -60,7 +61,14 @@ def get_claims_service(
     return services.claims
 
 
+def get_claim_status_tool(
+    services: Annotated[ServiceContainer, Depends(get_services)],
+) -> ClaimStatusTool:
+    return services.claim_status_tool
+
+
 SettingsDep = Annotated[Settings, Depends(get_app_settings)]
 ServicesDep = Annotated[ServiceContainer, Depends(get_services)]
 AuthenticationServiceDep = Annotated[AuthenticationService, Depends(get_authentication_service)]
 ClaimsServiceDep = Annotated[ClaimsService, Depends(get_claims_service)]
+ClaimStatusToolDep = Annotated[ClaimStatusTool, Depends(get_claim_status_tool)]

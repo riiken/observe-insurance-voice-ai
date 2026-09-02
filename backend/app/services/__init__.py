@@ -13,6 +13,7 @@ from app.services.authentication import (
 )
 from app.services.authorization import require_authenticated
 from app.services.claims import ClaimsService, ClaimStatusResult
+from app.services.guidance import ClaimGuidance, load_claim_guidance
 from app.services.session_store import InMemorySessionStore, SessionStore
 
 __all__ = [
@@ -21,7 +22,9 @@ __all__ = [
     "AuthenticationStepResult",
     "ClaimStatusResult",
     "ClaimsService",
+    "ClaimGuidance",
     "InMemorySessionStore",
     "SessionStore",
+    "load_claim_guidance",
     "require_authenticated",
 ]

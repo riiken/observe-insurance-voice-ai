@@ -1,4 +1,8 @@
 # syntax=docker/dockerfile:1
+#
+# Build from the REPOSITORY ROOT, not from backend/:
+#   docker build -f backend/Dockerfile -t observe-insurance-voice-ai .
+# The image needs both backend/app and the knowledge/ content it reads.
 
 # --- build stage -------------------------------------------------------------
 # Dependencies are installed into a virtualenv that is copied into a clean
@@ -12,7 +16,7 @@ WORKDIR /build
 
 # Copy only the metadata first so the dependency layer is cached across
 # source-only changes.
-COPY pyproject.toml ./
+COPY backend/pyproject.toml ./
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --upgrade pip \
     && mkdir -p app && touch app/__init__.py \
@@ -26,7 +30,8 @@ ENV PYTHONUNBUFFERED=1 \
     PATH="/opt/venv/bin:$PATH" \
     ENVIRONMENT=prod \
     LOG_FORMAT=json \
-    PORT=8000
+    PORT=8000 \
+    CLAIM_GUIDANCE_PATH=/srv/knowledge/claim_guidance.json
 
 # Run unprivileged.
 RUN useradd --create-home --uid 1000 appuser
@@ -34,7 +39,10 @@ RUN useradd --create-home --uid 1000 appuser
 WORKDIR /srv
 
 COPY --from=builder /opt/venv /opt/venv
-COPY --chown=appuser:appuser app ./app
+COPY --chown=appuser:appuser backend/app ./app
+# Configured content the agent reads from. Shipped alongside the code so a
+# deployment cannot start with guidance it cannot find — startup validates it.
+COPY --chown=appuser:appuser knowledge ./knowledge
 
 USER appuser
 

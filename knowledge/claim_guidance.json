@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Configured claim guidance. The agent may say what is written here and",
+    "nothing else about next steps or document submission.",
+    "Kept out of the system prompt so it can be reviewed and changed by the",
+    "claims team without touching agent behaviour (CLAUDE.md §12).",
+    "Every ClaimStatus must appear under 'statuses' or startup fails: a status",
+    "with no configured guidance would leave the agent improvising, which is",
+    "the one thing it must never do about a customer's claim."
+  ],
+  "submission": {
+    "portal_url": "observeinsurance.com/documents",
+    "email": "documents@observeinsurance.com",
+    "mailing_address": "Observe Insurance, Claims Department, 400 Harbor Street, Suite 210, Boston, Massachusetts 02210",
+    "reference_instruction": "include the claim number on every page",
+    "turnaround": "Documents are usually reviewed within three business days of arriving."
+  },
+  "statuses": {
+    "SUBMITTED": {
+      "summary": "your claim has been submitted and is waiting to be assigned to an adjuster",
+      "next_step": "No action is needed from the customer. An adjuster will be assigned and will make contact.",
+      "speech_next_step": "There's nothing you need to do right now. An adjuster will be assigned and they'll be in touch."
+    },
+    "UNDER_REVIEW": {
+      "summary": "your claim is currently under review",
+      "next_step": "No action is needed from the customer while the adjuster completes their review.",
+      "speech_next_step": "There's nothing you need to do while that's happening. We'll contact you if anything else is needed."
+    },
+    "APPROVED": {
+      "summary": "your claim has been approved",
+      "next_step": "The claims team will contact the customer with the settlement details.",
+      "speech_next_step": "The claims team will be in touch with the details."
+    },
+    "REJECTED": {
+      "summary": "your claim was not approved",
+      "next_step": "A decision letter explaining the reasons has been issued. The customer may ask to speak to a representative about it.",
+      "speech_next_step": "A letter explaining the decision has been sent out. If you'd like to go through it with someone, I can put you through to a representative."
+    },
+    "DOCUMENTS_REQUIRED": {
+      "summary": "your claim is on hold until we receive some documents",
+      "next_step": "The customer must submit the listed documents before the claim can proceed.",
+      "speech_next_step": "Once those reach us, the claim can move forward."
+    }
+  }
+}

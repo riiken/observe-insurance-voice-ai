@@ -7,11 +7,11 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 3 complete — foundation, data integration, and the
-> authentication boundary.**
-> The service runs; customer lookup, identity verification and claim retrieval
-> work against Google Sheets; and session state now decides who may hear claim
-> data. Still to come: agent tools, prompts, and the voice platform webhook.
+> **Status: Phase 4 complete — authenticated claims support.**
+> The service runs; a verified caller can ask about their claim and get a
+> spoken answer, including the documents-required workflow. Still to come: the
+> remaining tools (FAQ, escalation, call completion), the agent prompt layer,
+> and the voice platform webhook.
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -75,7 +75,8 @@ ruff check backend
 ## Docker
 
 ```bash
-docker build -t observe-insurance-voice-ai ./backend
+# Build from the repository root: the image needs backend/app and knowledge/.
+docker build -f backend/Dockerfile -t observe-insurance-voice-ai .
 docker run --rm -p 8000:8000 --env-file .env observe-insurance-voice-ai
 ```
 
@@ -127,12 +128,16 @@ observe-insurance-voice-ai/
 │   │   │   ├── router.py        #   router assembly
 │   │   │   └── v1/router.py     #   versioned product API (empty in Phase 1)
 │   │   ├── agents/              # conversation orchestration        (Phase 4)
-│   │   ├── tools/               # narrow agent-callable tools       (Phase 4)
+│   │   ├── tools/               # narrow agent-callable tools
+│   │   │   ├── base.py          #   ToolResult: structured data + spoken line
+│   │   │   └── claim_status.py  #   get_claim_status
 │   │   ├── services/            # business logic — the only layer that decides
 │   │   │   ├── session_store.py #   server-side session persistence
 │   │   │   ├── authentication.py#   the START -> AUTHENTICATED state machine
 │   │   │   ├── authorization.py #   the single claim-access gate
 │   │   │   ├── claims.py        #   claim access, gated on session state
+│   │   │   ├── guidance.py      #   configured claim guidance loader
+│   │   │   ├── voice.py         #   structured data -> natural speech
 │   │   │   └── container.py     #   service assembly
 │   │   ├── integrations/        # external-system adapters
 │   │   │   ├── base.py          #   HealthCheckable / DependencyStatus contracts
@@ -162,7 +167,8 @@ observe-insurance-voice-ai/
 │   ├── architecture.md
 │   ├── google-sheets-setup.md   # sheet schema + setup
 │   └── DEFERRED.md              # running ledger of deferred work
-├── knowledge/                   # FAQ content, kept out of the prompt (Phase 3)
+├── knowledge/
+│   └── claim_guidance.json      # next steps + submission instructions
 ├── scripts/seed_data/           # demo customer + claim CSVs
 ├── docker-compose.yml
 └── .env.example
@@ -333,13 +339,72 @@ line.
 
 ---
 
+## Claim status
+
+`ClaimStatusTool.get_claim_status(call_id, customer_id=None)` answers "what's
+happening with my claim?" for a verified caller.
+
+**Authentication is enforced twice, on purpose.** The service raises; the tool
+converts that into a spoken refusal so the call continues. The outer layer has
+no way to authorise anything — only to phrase what the inner one decided.
+
+**On `customer_id`.** It is optional and never trusted. The authoritative
+customer is whoever the *session* verified as; a supplied id is checked against
+that and a mismatch is refused **before any lookup happens**. So the argument
+lets an agent be explicit, but cannot aim the tool at somebody else's claim.
+
+### Structured response
+
+```
+claim_id · status · required_documents · last_updated · next_step
+                                       (+ submission_instructions when needed)
+```
+
+`next_step` and `submission_instructions` are copied from
+[`knowledge/claim_guidance.json`](knowledge/claim_guidance.json) — reviewable
+content the claims team owns, kept out of the prompt (CLAUDE.md §12). **Every
+`ClaimStatus` must be configured or the process refuses to start**, because the
+alternative is discovering the gap mid-call, when the only options left are
+improvising about someone's claim or dead air.
+
+### Voice layer
+
+[`services/voice.py`](backend/app/services/voice.py) turns structured data into
+something worth hearing — a caller cannot skim, and cannot re-read a sentence
+they missed:
+
+> Your claim is on hold until we receive some documents. It was last updated on
+> August the 28th. We need a police report and a repair estimate. Once those
+> reach us, the claim can move forward. Would you like me to explain how to send
+> those in?
+
+Dates are spelled out because a TTS engine handed `2026-08-28` reads digits.
+Claim references are spaced (`CLM 88402`) so a caller can write them down. Tests
+assert the properties CLAUDE.md §16 asks for — no markdown, no JSON, at most one
+question, and no promise of approval or payment timing.
+
+### Failure handling
+
+| Situation | Outcome | What the caller hears |
+| --------- | ------- | --------------------- |
+| Not authenticated | `NOT_AUTHORIZED` | One fixed line, identical for every unauthorised state |
+| No claim on file | `NOT_FOUND` | An honest "I can't see one", plus a representative |
+| Status says documents needed, but none listed | `INCOMPLETE_DATA` | Admits the gap and offers a representative |
+| Sheet unreachable / timeout | `INTEGRATION_ERROR` | Apologises, offers a representative — **states no claim facts** |
+
+Nothing is ever invented. On any non-success outcome `data` is `None`, so there
+is no partially populated object for the agent to mine, and the failure lines
+are fixed strings containing no status words.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-270 tests, all deterministic and offline — no Google credentials, no network.
+364 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so
@@ -353,8 +418,10 @@ claim lookup including documents-required and most-recently-updated selection;
 every authentication state transition; the three-attempt budget and its terminal
 states; customer-not-found kept distinct from authentication failure;
 unauthorised claim access from every non-authenticated state; prompt-injection
-strings through both caller inputs; pre-authentication disclosure; health and
-readiness; the error envelope and its non-leakage guarantees; configuration
+strings through every caller input including the tool's `customer_id`;
+pre-authentication disclosure; all five claim statuses end to end; the
+documents-required workflow; guidance completeness; voice-output properties;
+health and readiness; the error envelope and its non-leakage guarantees; configuration
 validation; and log shape and redaction.
 
 ---
@@ -364,8 +431,10 @@ validation; and log shape and redaction.
 Phases 1–2 cover the foundation and the customer/claim data integration.
 Deliberately **not** implemented yet:
 
-- The six agent tools (`tools/` exists and is empty)
-- Agent prompts, turn handling, emergency routing, and the FAQ service
+- The remaining five tools: `lookup_customer`, `verify_identity`, `search_faq`,
+  `request_representative`, `complete_call`
+- Agent prompts, turn handling and emergency routing
+- FAQ knowledge content and the FAQ service
 - Escalation records (session state tracks escalation; no record is written yet)
 - The voice platform webhook and any LLM orchestration
 - FAQ knowledge base content
