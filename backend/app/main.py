@@ -41,6 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             guidance_path=settings.claim_guidance_path,
             faq_directory=settings.faq_directory,
             prompt_path=settings.system_prompt_path,
+            transfer_to=settings.voice_transfer_phone_number,
         )
         if integration is not None
         else None

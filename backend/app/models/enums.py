@@ -94,7 +94,15 @@ class EscalationReason(StrEnum):
 
 
 class EscalationStatus(StrEnum):
-    PENDING = "PENDING"
+    """Lifecycle of an escalation record.
+
+    A record is created as REQUESTED. It becomes TRANSFERRING only when the
+    voice platform is actually configured to hand the call over — we do not
+    claim to have routed a caller anywhere we have not.
+    """
+
+    REQUESTED = "REQUESTED"
+    TRANSFERRING = "TRANSFERRING"
     ROUTED = "ROUTED"
     FAILED = "FAILED"
 

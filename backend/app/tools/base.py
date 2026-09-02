@@ -54,6 +54,10 @@ class ToolResult(Generic[TPayload]):
     data: TPayload | None = None
     # Safe-to-log detail. Never spoken, never returned to a caller.
     context: dict[str, str] = field(default_factory=dict)
+    # Where to hand the call, provider-neutral. The voice adapter turns this
+    # into whatever the platform's transfer payload looks like; nothing in the
+    # tool layer knows that shape.
+    transfer_to: str | None = None
 
     @property
     def succeeded(self) -> bool:

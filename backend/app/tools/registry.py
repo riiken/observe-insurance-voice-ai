@@ -15,13 +15,17 @@ operation that enforces its own rules.
 payload and injected by the dispatcher, so the model cannot name a different
 call and inherit its authentication. Every parameter schema below describes
 only what the *caller* said.
+
+**Safety runs before any tool does.** An emergency can arrive in the answer to
+any question, so the dispatcher checks the caller's words first and takes over
+if it finds one — see `safety_interceptor.py`.
 """
 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 from app.core.logging import event, get_logger
 from app.tools.base import ToolOutcome, ToolResult
@@ -63,11 +67,25 @@ class ToolDefinition:
         }
 
 
+class SafetyInterceptor(Protocol):
+    """Something that may take over a tool call before it runs."""
+
+    async def intercept(
+        self, tool_name: str, call_id: str, arguments: dict[str, Any]
+    ) -> ToolResult | None: ...
+
+
 class ToolRegistry:
     """Dispatches a tool call by name, with `call_id` supplied by the platform."""
 
-    def __init__(self, definitions: list[ToolDefinition]) -> None:
+    def __init__(
+        self,
+        definitions: list[ToolDefinition],
+        *,
+        safety: SafetyInterceptor | None = None,
+    ) -> None:
         self._definitions = {definition.name: definition for definition in definitions}
+        self._safety = safety
 
     @property
     def definitions(self) -> list[ToolDefinition]:
@@ -99,6 +117,14 @@ class ToolRegistry:
                 "tool.arguments_ignored",
                 extra=event(tool=name, call_id=call_id, ignored=ignored),
             )
+
+        # Before anything else: is the caller telling us they are in danger?
+        # Checked ahead of argument validation, because an emergency described
+        # in a malformed call is still an emergency.
+        if self._safety is not None:
+            intercepted = await self._safety.intercept(name, call_id, supplied)
+            if intercepted is not None:
+                return intercepted
 
         missing = [
             parameter.name
@@ -139,6 +165,7 @@ def build_registry(
     get_claim_status: ToolHandler,
     search_faq: ToolHandler,
     request_representative: ToolHandler,
+    safety: SafetyInterceptor | None = None,
 ) -> ToolRegistry:
     """The five tools the agent is given. Adding a sixth is a deliberate act."""
     return ToolRegistry(
@@ -230,5 +257,6 @@ def build_registry(
                 ),
                 handler=request_representative,
             ),
-        ]
+        ],
+        safety=safety,
     )

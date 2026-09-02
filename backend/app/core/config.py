@@ -75,6 +75,12 @@ class Settings(BaseSettings):
     # an unauthenticated webhook is an open door to the tool layer.
     voice_platform_api_key: str | None = None
 
+    # Where a representative request hands the call. Unset means the platform
+    # cannot transfer, and the realistic escalation workflow runs instead — the
+    # escalation record then says REQUESTED rather than claiming a transfer we
+    # did not perform.
+    voice_transfer_phone_number: str | None = None
+
     @field_validator("log_level")
     @classmethod
     def _normalise_log_level(cls, value: str) -> str:

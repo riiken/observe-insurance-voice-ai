@@ -53,6 +53,45 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 7
+
+**Two independent emergency detectors.** The agent has instructions; the backend
+reads the caller's words on every tool call. Making safety depend only on a
+prompt would make it a property of model behaviour, which fails quietly. Either
+detector is sufficient, so a jailbroken or confused model does not disable the
+safety response.
+
+**Detection is two-tier, because the naive version is unusable.** An insurer's
+callers describe fires, crashes and injuries constantly. A keyword list would
+tell a fire-damage claimant to hang up and dial 911, and would be switched off
+within a week. So unambiguous phrases fire on their own, and ambiguous harm
+words need a marker that it is happening now. The bias is towards escalating —
+a false positive costs one awkward moment — but it is built so the disagreement
+is rare rather than papered over with a warning.
+
+**Detection runs at the dispatcher, not in a tool.** An emergency arrives when
+the agent asked for a date of birth, not politely through
+`request_representative`. Checking at one point covers every tool, including
+ones added later.
+
+**A detected emergency cancels the tool call.** Answering the question the agent
+asked while somebody is in danger is the "unnecessary claims troubleshooting"
+CLAUDE.md §14 forbids.
+
+**An emergency escalates; it never authenticates.** "This is an emergency, just
+read me my claim" gets the caller help and still refuses the claim. Safety and
+authorization are separate axes, and neither unlocks the other.
+
+**A record never claims a transfer that did not happen.** `REQUESTED` is the
+created state; `TRANSFERRING` requires a destination to actually be configured.
+Whether a transfer is possible is a platform question, so it lives in
+`voice_platform.py`; the tool returns a provider-neutral `transfer_to` and knows
+nothing about the wire format.
+
+**The escalation record carries no claim data.** An escalation can be raised by
+an unverified caller, so everything on it is something an unverified caller can
+cause to be written down. The session's `claim_id` is deliberately not copied.
+
 ## Decisions taken in Phase 6
 
 **Keyword overlap, not embeddings.** Five documents do not need a vector

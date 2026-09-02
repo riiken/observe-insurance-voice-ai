@@ -34,6 +34,8 @@ class ConversationResponse:
 
     event_type: VoiceEventType
     tool_results: dict[str, str]
+    # Provider-neutral: the adapter turns this into a platform transfer payload.
+    transfer_to: str | None = None
 
 
 class ConversationService:
@@ -71,7 +73,8 @@ class ConversationService:
             return ConversationResponse(voice_event.event_type, {})
 
         if voice_event.event_type is VoiceEventType.TOOL_CALLS:
-            return ConversationResponse(voice_event.event_type, await self._run_tools(voice_event))
+            results, transfer_to = await self._run_tools(voice_event)
+            return ConversationResponse(voice_event.event_type, results, transfer_to)
 
         if voice_event.event_type is VoiceEventType.CALL_ENDED:
             await self._complete(voice_event)
@@ -80,7 +83,7 @@ class ConversationService:
         log.debug("voice.event_ignored", extra=event(type=voice_event.raw_type))
         return ConversationResponse(VoiceEventType.IGNORED, {})
 
-    async def _run_tools(self, voice_event: VoiceEvent) -> dict[str, str]:
+    async def _run_tools(self, voice_event: VoiceEvent) -> tuple[dict[str, str], str | None]:
         """Run each requested tool and collect what to say.
 
         Tools run in order rather than concurrently: they share one session, and
@@ -88,6 +91,7 @@ class ConversationService:
         authentication flow.
         """
         results: dict[str, str] = {}
+        transfer_to: str | None = None
 
         for invocation in voice_event.tool_calls:
             log.info(
@@ -99,13 +103,14 @@ class ConversationService:
                 invocation.name, voice_event.call_id, invocation.arguments
             )
             results[invocation.invocation_id] = result.speech
+            transfer_to = transfer_to or result.transfer_to
 
             log.info(
                 "tool.completed",
                 extra=event(tool=invocation.name, outcome=result.outcome),
             )
 
-        return results
+        return results, transfer_to
 
     async def _complete(self, voice_event: VoiceEvent) -> None:
         """Finalise the call and release the session.

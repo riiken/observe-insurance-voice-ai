@@ -11,18 +11,21 @@ from pathlib import Path
 
 from app.agents.prompt import load_system_prompt
 from app.integrations.factory import DataIntegration
+from app.integrations.voice_platform import supports_transfer
 from app.services.authentication import AuthenticationService
 from app.services.claims import ClaimsService
 from app.services.conversation import ConversationService
 from app.services.escalation import EscalationService
 from app.services.faq import FaqService, load_faq_entries
 from app.services.guidance import ClaimGuidance, load_claim_guidance
+from app.services.safety import SafetyService
 from app.services.session_store import InMemorySessionStore, SessionStore
 from app.tools.authentication_tools import LookupCustomerTool, VerifyIdentityTool
 from app.tools.claim_status import ClaimStatusTool
 from app.tools.faq_tool import SearchFaqTool
 from app.tools.registry import ToolRegistry, build_registry
 from app.tools.representative_tool import RequestRepresentativeTool
+from app.tools.safety_interceptor import EmergencyInterceptor
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +37,7 @@ class ServiceContainer:
     claims: ClaimsService
     escalation: EscalationService
     faq: FaqService
+    safety: SafetyService
     conversation: ConversationService
     guidance: ClaimGuidance
     tools: ToolRegistry
@@ -47,6 +51,7 @@ def build_services(
     guidance_path: Path | None = None,
     faq_directory: Path | None = None,
     prompt_path: Path | None = None,
+    transfer_to: str | None = None,
 ) -> ServiceContainer:
     """Wire the services and tools onto Integration #1.
 
@@ -70,17 +75,23 @@ def build_services(
 
     authentication = AuthenticationService(integration.customers, sessions)
     claims = ClaimsService(integration.claims, sessions)
-    escalation = EscalationService(sessions)
+    safety = SafetyService()
+    escalation = EscalationService(sessions, transfer_available=supports_transfer(transfer_to))
 
     claim_status_tool = ClaimStatusTool(claims, guidance)
 
     # The five tools the agent gets. Nothing else is reachable from a webhook.
+    # The interceptor runs ahead of all of them, so an emergency described in
+    # answer to any question takes over the turn.
     tools = build_registry(
         lookup_customer=LookupCustomerTool(authentication),
         verify_identity=VerifyIdentityTool(authentication),
         get_claim_status=claim_status_tool,
         search_faq=SearchFaqTool(faq),
-        request_representative=RequestRepresentativeTool(escalation),
+        request_representative=RequestRepresentativeTool(
+            escalation, safety, transfer_to=transfer_to
+        ),
+        safety=EmergencyInterceptor(safety, escalation, transfer_to=transfer_to),
     )
 
     return ServiceContainer(
@@ -89,6 +100,7 @@ def build_services(
         claims=claims,
         escalation=escalation,
         faq=faq,
+        safety=safety,
         conversation=ConversationService(
             authentication=authentication, sessions=sessions, tools=tools
         ),

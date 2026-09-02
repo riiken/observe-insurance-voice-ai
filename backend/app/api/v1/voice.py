@@ -92,7 +92,7 @@ async def voice_webhook(
     if response.event_type is VoiceEventType.TOOL_CALLS:
         return JSONResponse(
             status_code=status.HTTP_200_OK,
-            content=format_tool_results(response.tool_results),
+            content=format_tool_results(response.tool_results, transfer_to=response.transfer_to),
         )
 
     return JSONResponse(status_code=status.HTTP_200_OK, content=acknowledgement())

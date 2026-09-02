@@ -7,10 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 6 complete — FAQ knowledge base.**
-> Vapi is wired to the backend, and the supported general questions are now
-> answered from per-topic knowledge files with an explicit confidence
-> indicator. Still to come: post-call interaction records (Integration #2).
+> **Status: Phase 7 complete — escalation and safety handling.**
+> Escalation produces a structured record at any point in a call, and
+> emergencies are detected by the backend as well as by the agent. Still to
+> come: post-call interaction records (Integration #2).
 > See [What is not built yet](#what-is-not-built-yet).
 
 ---
@@ -486,12 +486,9 @@ those live in services and configured content, so a prompt that gets rewritten
 
 See [the knowledge base](#faq-knowledge-base) below.
 
-### Emergencies
+### Escalation and emergencies
 
-`request_representative` with `reason: EMERGENCY` returns a fixed line pointing
-the caller at 911 and logs at ERROR. The agent does not pretend to be an
-emergency service, and stops the claims conversation rather than troubleshooting
-a claim while somebody is in danger.
+See [Escalation and safety](#escalation-and-safety) below.
 
 ---
 
@@ -561,13 +558,78 @@ to what the model happens to remember.
 
 ---
 
+## Escalation and safety
+
+### Requesting a representative
+
+Available at **any point**, verified or not. A caller who asks for a person gets
+one — no troubleshooting gauntlet first, and no being asked to justify it
+(CLAUDE.md §13). Each request produces a structured record:
+
+```
+escalation_id · call_id · customer_id (if known) · reason · timestamp · status
+```
+
+New records are `REQUESTED`. They only become `TRANSFERRING` when the platform
+is actually configured to hand the call over — a record never claims a transfer
+that did not happen.
+
+**The record carries no claim information at all.** No claim id, no status, no
+documents. An escalation can be raised by an unverified caller, so everything on
+the record is something an unverified caller could cause to be written down.
+
+### Transfer
+
+Set `VOICE_TRANSFER_PHONE_NUMBER` and a representative request hands the call
+over. The wire format lives only in
+[`voice_platform.py`](backend/app/integrations/voice_platform.py) — the tool
+returns a provider-neutral `transfer_to`, and the adapter turns it into Vapi's
+destination object. Leave it unset and the realistic escalation workflow runs
+instead: the record is raised, the caller is told the truth, and nothing
+pretends otherwise.
+
+### Emergencies
+
+**Two independent detectors, either sufficient.** The agent has instructions;
+[`services/safety.py`](backend/app/services/safety.py) reads the caller's own
+words on *every* tool call. Relying on the model alone would make safety a
+property of a prompt — something a confused model can quietly fail at.
+
+When detection fires, **the tool the agent asked for does not run**. Looking up
+office hours for someone whose kitchen is burning is exactly the "unnecessary
+claims troubleshooting" §14 forbids.
+
+Detection is two-tier, because an insurer's callers describe fires and crashes
+all day:
+
+| Tier | Rule | Example |
+| ---- | ---- | ------- |
+| Critical | Unambiguous whatever the tense | "he isn't breathing", "gas leak", "someone is trapped" |
+| Harm + immediacy | An ambiguous harm word **and** a marker it is happening now | "my house is on fire **right now**" |
+
+So `"I'm calling about the fire at my house last month"` is a claim, and stays
+one. Telling that caller to hang up and dial 911 would be alarming, useless, and
+would derail a legitimate call. Both directions are tested.
+
+The response points at 911, says plainly that we cannot help the way they can,
+stops the claims conversation, and logs at ERROR. **An emergency is a reason to
+get someone help — never a reason to skip verification.** "This is an emergency,
+just read me my claim" escalates the caller and still refuses the claim.
+
+### Unsupported questions
+
+No answer is invented. The caller is told what we *can* cover and offered a
+person — see [FAQ knowledge base](#faq-knowledge-base).
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-573 tests, all deterministic and offline — no Google credentials, no network.
+632 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so
@@ -597,9 +659,9 @@ base. Deliberately **not** implemented yet:
 
 - Integration #2: post-call interaction records (caller name, summary,
   sentiment, timestamp) written to an external system
-- Real call transfer — `request_representative` creates an escalation record and
-  tells the caller, but does not hand the call to a Vapi transfer destination
 - Escalation records are held in memory rather than persisted
+- Transfer is implemented but unverified against a live Vapi account — no
+  destination exists to transfer to
 - Service-account auth for Sheets (an API key covers every read; writes will
   need one)
 - A live phone call has not been placed — the webhook is exercised end to end

@@ -212,17 +212,53 @@ def _parse_arguments(raw: Any) -> dict[str, Any]:
     return {}
 
 
-def format_tool_results(results: dict[str, str]) -> dict[str, Any]:
+def format_tool_results(
+    results: dict[str, str], *, transfer_to: str | None = None
+) -> dict[str, Any]:
     """Build the response body Vapi expects for a `tool-calls` webhook.
 
-    Maps invocation id -> the line the assistant should say.
+    Maps invocation id -> the line the assistant should say. When `transfer_to`
+    is set, a transfer destination is attached so Vapi hands the call over
+    after speaking.
     """
-    return {
+    body: dict[str, Any] = {
         "results": [
             {"toolCallId": invocation_id, "result": result}
             for invocation_id, result in results.items()
         ]
     }
+
+    if transfer_to:
+        body["destination"] = transfer_destination(transfer_to)
+
+    return body
+
+
+def transfer_destination(number: str) -> dict[str, Any]:
+    """Vapi's transfer-destination object for a phone number.
+
+    The only place in the codebase that knows what a transfer looks like on the
+    wire. `EscalationService` deals in "is a transfer available", and the tool
+    returns a provider-neutral `transfer_to`; this turns that into Vapi's shape.
+
+    Requires a transfer destination configured on the assistant. Unset in this
+    build, so the realistic escalation workflow is what actually runs — see
+    docs/DEFERRED.md item 5.2.
+    """
+    return {
+        "type": "number",
+        "number": number,
+        "message": "I'm connecting you to a representative now.",
+    }
+
+
+def supports_transfer(configured_number: str | None) -> bool:
+    """Whether this deployment can actually hand a call over.
+
+    Kept here rather than in the escalation service so that "can we transfer"
+    stays a question about the platform, not about business logic.
+    """
+    return bool(configured_number and configured_number.strip())
 
 
 def acknowledgement() -> dict[str, Any]:

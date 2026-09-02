@@ -9,6 +9,7 @@ import pytest
 from app.agents.prompt import PromptConfigurationError, load_system_prompt
 from app.models.enums import EscalationReason, EscalationStatus
 from app.services.escalation import EscalationService
+from app.services.safety import SafetyService
 from app.services.session_store import InMemorySessionStore
 from app.tools.base import ToolOutcome
 from app.tools.representative_tool import RequestRepresentativeTool
@@ -28,7 +29,7 @@ async def test_an_escalation_record_has_everything_a_router_needs() -> None:
     assert record.escalation_id.startswith("ESC-")
     assert record.call_id == CALL
     assert record.reason is EscalationReason.CALLER_REQUEST
-    assert record.status is EscalationStatus.PENDING
+    assert record.status is EscalationStatus.REQUESTED
     assert record.created_at.tzinfo is not None
 
 
@@ -59,7 +60,7 @@ async def test_an_escalation_from_a_verified_call_carries_the_customer() -> None
 
 
 async def test_an_emergency_is_flagged_and_answered_safely() -> None:
-    tool = RequestRepresentativeTool(EscalationService(InMemorySessionStore()))
+    tool = RequestRepresentativeTool(EscalationService(InMemorySessionStore()), SafetyService())
 
     result = await tool(CALL, reason="EMERGENCY")
 
@@ -72,7 +73,7 @@ async def test_an_emergency_is_flagged_and_answered_safely() -> None:
 
 async def test_an_unrecognised_reason_still_escalates() -> None:
     """Refusing to transfer because of a bad enum would be the wrong failure."""
-    tool = RequestRepresentativeTool(EscalationService(InMemorySessionStore()))
+    tool = RequestRepresentativeTool(EscalationService(InMemorySessionStore()), SafetyService())
 
     result = await tool(CALL, reason="because I said so")
 
