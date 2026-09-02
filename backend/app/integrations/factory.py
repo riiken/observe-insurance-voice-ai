@@ -67,6 +67,8 @@ def build_data_integration(settings: Settings) -> DataIntegration | None:
         timeout_seconds=settings.http_timeout_seconds,
         max_retries=settings.http_max_retries,
         backoff_base_seconds=settings.http_backoff_base_seconds,
+        # A caller is on the line for every one of these reads.
+        total_budget_seconds=settings.voice_turn_budget_seconds,
     )
 
     customers = GoogleSheetsCustomerRepository(
@@ -138,7 +140,9 @@ def _build_interactions(
         spreadsheet_id=str(settings.google_interactions_spreadsheet_id),
         authorizer=authorizer,
         base_url=settings.google_sheets_base_url,
-        timeout_seconds=settings.http_timeout_seconds,
+        # Nobody is waiting on a post-call write, so it gets the longer timeout
+        # and the full attempt budget.
+        timeout_seconds=settings.postcall_timeout_seconds,
         max_retries=settings.http_max_retries,
         backoff_base_seconds=settings.http_backoff_base_seconds,
     )

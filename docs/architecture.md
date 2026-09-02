@@ -53,6 +53,29 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 10
+
+**The failure matrix is data, not prose.** A hand-written matrix is out of date
+the first time someone adds an error code. `core/failures.py` holds the
+catalogue, `docs/FAILURE-MATRIX.md` is generated from it, and two tests fail the
+build if the document drifts or if a code exists that the catalogue does not
+describe. Adding a failure mode now requires deciding how it is handled.
+
+**A per-attempt timeout is the wrong budget for a phone call.** Three attempts
+at ten seconds is thirty seconds of silence, and by the end of it the retry is
+pointless because the caller has gone. Anything a caller waits through now has a
+wall-clock budget as well as an attempt budget, and fails fast so there is time
+to apologise. Post-call writes, which nobody waits on, keep the longer one.
+
+**Data quality is classified as infrastructure.** A sheet we cannot parse is our
+fault. The tempting alternative — treating an unreadable row as "no such record"
+— is the exact conflation the system is built to prevent, so DATA_QUALITY sits
+with the upstream failures rather than with NOT_FOUND.
+
+**Permanent upstream failures are a separate code.** A 4xx from Sheets means a
+bad key or an unshared sheet: retrying cannot help, and a distinct code tells a
+responder to change something rather than wait.
+
 ## Decisions taken in Phase 9
 
 **Scenario tests read as transcripts.** They drive the real webhook and assert

@@ -147,7 +147,8 @@ class ServiceAccountAuthorizer:
             raise IntegrationError(
                 "Google rejected the service account credentials.",
                 integration=INTEGRATION_NAME,
-                status_code=response.status_code,
+                # Diagnostic, not our HTTP status — see the note in client.py.
+                upstream_status=response.status_code,
                 retryable=response.status_code >= 500,
             )
 

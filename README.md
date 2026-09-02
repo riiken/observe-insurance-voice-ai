@@ -7,9 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 9 complete — verified end to end.**
-> All eight required scenarios are covered by whole-call tests that drive the
-> real webhook. Every requirement in CLAUDE.md is checked off, with evidence, in
+> **Status: Phase 10 complete — failure handling hardened.**
+> Every external boundary is deliberately broken under test, and the
+> [failure matrix](docs/FAILURE-MATRIX.md) is generated from code so it cannot
+> drift. Every CLAUDE.md requirement is checked off with evidence in
 > [docs/REQUIREMENTS-CHECKLIST.md](docs/REQUIREMENTS-CHECKLIST.md).
 > See [What is not built yet](#what-is-not-built-yet).
 
@@ -173,6 +174,7 @@ observe-insurance-voice-ai/
 │   │       ├── logging.py       #   JSON + console formatters, redaction
 │   │       ├── middleware.py    #   correlation id + access log
 │   │       ├── errors.py        #   AppError hierarchy
+│   │       ├── failures.py      #   the failure catalogue
 │   │       ├── phone.py         #   E.164 normalisation
 │   │       ├── retry.py         #   bounded retry, backoff with jitter
 │   │       └── exception_handlers.py
@@ -184,6 +186,7 @@ observe-insurance-voice-ai/
 │   ├── google-sheets-setup.md   # sheet schema + setup
 │   ├── vapi-setup.md            # configuring the voice assistant
 │   ├── REQUIREMENTS-CHECKLIST.md # every CLAUDE.md requirement, with evidence
+│   ├── FAILURE-MATRIX.md        # generated from code; do not hand-edit
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
 │   ├── claim_guidance.json      # next steps + submission instructions
@@ -714,13 +717,56 @@ See [`test_end_to_end_scenarios.py`](backend/tests/test_end_to_end_scenarios.py)
 
 ---
 
+## Failure handling
+
+Every failure mode lives in one catalogue,
+[`core/failures.py`](backend/app/core/failures.py), with how it is detected,
+what the caller hears, and what happens next.
+[docs/FAILURE-MATRIX.md](docs/FAILURE-MATRIX.md) is **generated** from it, and a
+test fails the build if it drifts — or if a new error code ships without a
+decision about how it is handled.
+
+**The rule the catalogue exists to enforce: an infrastructure failure is never a
+business outcome.** A Sheets timeout is not a customer who does not exist. They
+never share a classification, a log level, or a sentence to a caller, and tests
+assert it in both directions.
+
+| Class | Meaning | Retried |
+| ----- | ------- | ------- |
+| `TRANSIENT_UPSTREAM` | A dependency is briefly unwell | **yes** |
+| `PERMANENT_UPSTREAM` | It will keep saying no — a human must fix something | no |
+| `DATA_QUALITY` | The data is unusable. Ours, never "no such record" | no |
+| `NOT_FOUND` | A correct answer: there is no such record. **Not a failure** | no |
+| `CALLER_INPUT` | Normal course of a support call | no |
+| `AUTHORIZATION` · `CONFIGURATION` · `INTERNAL` | | no |
+
+### Time budgets
+
+A per-attempt timeout is not enough for a voice call: three attempts at ten
+seconds is thirty seconds of silence, by which point retrying is pointless
+because the caller has gone. So anything a caller waits through has a
+**wall-clock budget** (`VOICE_TURN_BUDGET_SECONDS`, 6s) as well as an attempt
+budget — it fails fast, leaving time to apologise and offer a person. Post-call
+writes have nobody waiting and get the longer timeout.
+
+Backoff is exponential with **full jitter**: without it, every concurrent call
+hitting the same rate limit retries in lockstep and recreates the burst.
+
+### What a caller never hears
+
+Asserted for every failure branch: no status codes, no library or vendor names,
+no stack traces, no `None`, no JSON punctuation — and never which specific check
+refused them, since every authorization refusal is worded identically.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-718 tests, all deterministic and offline — no Google credentials, no network.
+790 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so

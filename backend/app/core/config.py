@@ -45,6 +45,16 @@ class Settings(BaseSettings):
     http_max_retries: int = Field(default=2, ge=0, le=5)
     http_backoff_base_seconds: float = Field(default=0.2, gt=0)
 
+    # Wall-clock ceiling for anything a caller is waiting through. Three
+    # attempts at ten seconds is thirty seconds of silence on a phone call, by
+    # which point retrying is pointless — the caller has gone. Failing fast
+    # leaves time to apologise and offer a person.
+    voice_turn_budget_seconds: float = Field(default=6.0, gt=0)
+
+    # Post-call writes have no caller waiting, so they may take longer and use
+    # the full attempt budget.
+    postcall_timeout_seconds: float = Field(default=20.0, gt=0)
+
     # --- Google Sheets (Integration #1: customer + claim retrieval) --------
     # An API key reads a link-shared sheet, which is all Phase 2 needs. Writes
     # (Integration #2) will need a service account; see docs/DEFERRED.md.

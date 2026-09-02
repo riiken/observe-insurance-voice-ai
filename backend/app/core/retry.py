@@ -6,12 +6,19 @@ the caller supplies it.
 
 Jitter matters here: without it, every concurrent call that hits the same Sheets
 rate limit retries in lockstep and re-creates the burst that caused it.
+
+**Attempts are not the only budget that matters.** Three attempts at ten seconds
+each is thirty seconds of silence on a phone call, by which point the caller has
+hung up and the retry is pointless. `total_budget_seconds` caps the wall-clock
+time the whole operation may take, so an in-call lookup fails fast and says
+something rather than succeeding to nobody.
 """
 
 from __future__ import annotations
 
 import asyncio
 import random
+import time
 from collections.abc import Awaitable, Callable
 from typing import TypeVar
 
@@ -32,17 +39,25 @@ async def retry_async(
     backoff_base_seconds: float,
     is_transient: Callable[[BaseException], bool],
     operation_name: str,
+    total_budget_seconds: float | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
 ) -> T:
-    """Run `operation`, retrying transient failures up to `max_retries` times.
+    """Run `operation`, retrying transient failures within both budgets.
 
-    Returns the first successful result. Re-raises the last exception once the
-    budget is exhausted, or immediately if the failure is not transient.
+    Returns the first successful result. Re-raises the last exception when
+    either budget is exhausted, or immediately if the failure is not transient.
 
-    `sleep` is injectable so tests exercise the backoff schedule without
-    actually waiting.
+    `total_budget_seconds` bounds wall-clock time across all attempts. It is
+    what keeps a live caller from waiting through a full retry schedule; None
+    means attempts are the only limit, which suits work nobody is waiting on.
+
+    `sleep` and `monotonic` are injectable so tests exercise the schedule
+    without waiting.
     """
+    started = monotonic()
     attempt = 0
+
     while True:
         try:
             return await operation()
@@ -51,6 +66,22 @@ async def retry_async(
                 raise
 
             delay = _backoff_delay(attempt, backoff_base_seconds)
+            elapsed = monotonic() - started
+
+            if total_budget_seconds is not None and (elapsed + delay >= total_budget_seconds):
+                # Retrying would overrun the budget. Giving up now leaves time
+                # to say something; retrying leaves the caller in silence.
+                log.warning(
+                    "retry.budget_exhausted",
+                    extra=event(
+                        operation=operation_name,
+                        attempt=attempt,
+                        elapsed_seconds=round(elapsed, 3),
+                        budget_seconds=total_budget_seconds,
+                    ),
+                )
+                raise
+
             attempt += 1
             log.warning(
                 "retry.attempt",
@@ -59,6 +90,7 @@ async def retry_async(
                     attempt=attempt,
                     max_retries=max_retries,
                     delay_seconds=round(delay, 3),
+                    elapsed_seconds=round(elapsed, 3),
                     error=type(exc).__name__,
                 ),
             )

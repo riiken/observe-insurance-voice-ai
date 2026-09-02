@@ -31,6 +31,26 @@ log = get_logger(__name__)
 _RETRYABLE_STATUS = frozenset({429, 500, 502, 503, 504})
 
 
+def _status_error(cell_range: str, status_code: int) -> IntegrationError:
+    """Classify a non-200 as transient or permanent.
+
+    A 4xx means a bad key, an unshared sheet or a wrong id: retrying cannot
+    help, and a distinct code tells a responder to change something rather than
+    wait.
+    """
+    retryable = status_code in _RETRYABLE_STATUS
+    return IntegrationError(
+        integration=INTEGRATION_NAME,
+        code=None if retryable else "UPSTREAM_PERMANENT",
+        range=cell_range,
+        # Named `upstream_status` deliberately: `status_code` is AppError's own
+        # HTTP status, and passing the upstream's here would make a Sheets 403
+        # come back as *our* 403 while losing the diagnostic entirely.
+        upstream_status=status_code,
+        retryable=retryable,
+    )
+
+
 def _is_transient(exc: BaseException) -> bool:
     if isinstance(exc, IntegrationTimeoutError):
         return True
@@ -51,11 +71,15 @@ class GoogleSheetsClient:
         timeout_seconds: float = 10.0,
         max_retries: int = 2,
         backoff_base_seconds: float = 0.2,
+        total_budget_seconds: float | None = None,
         transport: httpx.AsyncBaseTransport | None = None,
     ) -> None:
         self._spreadsheet_id = spreadsheet_id
         self._authorizer = authorizer
         self._max_retries = max_retries
+        # None means attempts are the only limit. Set it for anything a caller
+        # is waiting through.
+        self._total_budget_seconds = total_budget_seconds
         self._backoff_base_seconds = backoff_base_seconds
         self._client = httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -78,6 +102,7 @@ class GoogleSheetsClient:
             backoff_base_seconds=self._backoff_base_seconds,
             is_transient=_is_transient,
             operation_name="sheets.get_values",
+            total_budget_seconds=self._total_budget_seconds,
         )
 
         log.info(
@@ -109,6 +134,7 @@ class GoogleSheetsClient:
             backoff_base_seconds=self._backoff_base_seconds,
             is_transient=_is_transient,
             operation_name="sheets.append_values",
+            total_budget_seconds=self._total_budget_seconds,
         )
 
         log.info(
@@ -149,12 +175,7 @@ class GoogleSheetsClient:
             ) from exc
 
         if response.status_code != httpx.codes.OK:
-            raise IntegrationError(
-                integration=INTEGRATION_NAME,
-                range=cell_range,
-                status_code=response.status_code,
-                retryable=response.status_code in _RETRYABLE_STATUS,
-            )
+            raise _status_error(cell_range, response.status_code)
 
         return self._parse_append_body(response, cell_range, len(rows))
 
@@ -204,12 +225,7 @@ class GoogleSheetsClient:
             ) from exc
 
         if response.status_code != httpx.codes.OK:
-            raise IntegrationError(
-                integration=INTEGRATION_NAME,
-                range=cell_range,
-                status_code=response.status_code,
-                retryable=response.status_code in _RETRYABLE_STATUS,
-            )
+            raise _status_error(cell_range, response.status_code)
 
         return self._parse_body(response, cell_range)
 

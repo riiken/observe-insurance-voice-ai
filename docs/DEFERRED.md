@@ -88,6 +88,15 @@ was not deferred — it was missed.
 | 9.2 | **A documents-required call is filed as RESOLVED.** The *call* was resolved — the caller got a clear answer — but the *claim* is still outstanding. | `ConversationOutcome` describes the call, which is the right meaning for an interaction log. Anyone wanting claim state should read the claims sheet. Worth revisiting only if the column gets misread in practice. | Only if misread |
 | 9.3 | **The structured tool payloads never reach the model.** Vapi tool results are strings, so the agent gets `speech`; `data` is used internally and for tests. | Returning JSON risks the model reading it aloud, which §16 forbids. Everything the caller needs is in the spoken line, and scenario 5 confirms the follow-up path works. | Not scoped |
 
+### From Phase 10 — failure handling
+
+| # | Item | Why deferred | Lands in |
+| - | ---- | ------------ | -------- |
+| 10.1 | **No circuit breaker.** If Sheets is down, every call pays the full turn budget before failing. | The budget already caps the damage per turn at six seconds, and a breaker adds state that has to be right — a stuck-open breaker fails calls that would have worked. Worth adding with real traffic data on how often the upstream is actually down. | With measured need |
+| 10.2 | **No alerting.** Failures are logged at ERROR; nothing pages anyone. | Alerting is deployment configuration — a log sink and a rule — not application code. The severity in the catalogue is exactly what such a rule would key on. | Deployment |
+| 10.3 | **The turn budget is not enforced across a whole tool call**, only within one client's retry loop. A tool making two sequential reads could take twice the budget. | No current tool does, and enforcing it end-to-end means threading a deadline through every layer. Worth doing if a tool ever needs two round trips. | If a tool needs two calls |
+| 10.4 | **`INCOMPLETE_CLAIM_DATA` and similar data problems are logged but not reported anywhere a claims operator would look.** | The log carries the sheet row; surfacing it needs a dashboard or a digest, which is 6.3's problem restated. | Deployment |
+
 ---
 
 ## Closed
