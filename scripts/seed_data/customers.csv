@@ -1,0 +1,7 @@
+customer_id,full_name,phone_number,verification_value
+CUST-1001,Maria Alvarez,+1 555 010 1234,1985-04-12
+CUST-1002,James Okonkwo,+1 555 010 2345,1979-11-30
+CUST-1003,Priya Raman,+1 555 010 3456,1992-07-08
+CUST-1004,Daniel Whitfield,+1 555 010 4567,1968-02-21
+CUST-1005,Aisha Bello,+1 555 010 5678,1990-09-15
+CUST-1006,Thomas Lindqvist,+1 555 010 6789,1974-12-03

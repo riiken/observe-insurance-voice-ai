@@ -7,10 +7,11 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 1 — foundation only.**
-> The runnable service, configuration, logging, error handling, health probes
-> and test harness are in place. The claims workflow itself is not yet
-> implemented — see [What is not built yet](#what-is-not-built-yet).
+> **Status: Phase 2 complete — foundation + customer/claim data integration.**
+> The service runs, and customer lookup, identity verification and claim
+> retrieval work against Google Sheets. The conversation itself — session state,
+> the authentication boundary, agent tools and the voice webhook — is not built
+> yet. See [What is not built yet](#what-is-not-built-yet).
 
 ---
 
@@ -28,6 +29,11 @@ pip install -e "backend[dev]"
 
 cp .env.example .env          # defaults work as-is for local development
 ```
+
+The service runs without Google Sheets credentials: `/health` stays green and
+`/ready` simply reports no dependencies. To exercise the data integration, follow
+[docs/google-sheets-setup.md](docs/google-sheets-setup.md) and set
+`GOOGLE_SHEETS_SPREADSHEET_ID` and `GOOGLE_SHEETS_API_KEY`.
 
 Run the service:
 
@@ -53,6 +59,9 @@ Run the tests:
 ```bash
 pytest backend/tests            # from the repository root
 ```
+
+No Google credentials are needed: every external call is mocked at the HTTP
+transport.
 
 Lint:
 
@@ -90,6 +99,9 @@ and copied into a clean `python:3.13-slim` runtime that runs as a non-root user.
 | GET    | `/ready`        | Readiness. Probes registered dependencies; 503 if any is unhealthy. |
 | GET    | `/docs`         | OpenAPI UI. Disabled when `ENVIRONMENT` is `staging`/`prod`. |
 
+Once Sheets is configured, `/ready` probes both repositories and returns 503 if
+either the sheet is unreachable or a required column is missing.
+
 Health probes deliberately sit **outside** the `/api/v1` prefix: they are an
 operational contract for the load balancer and container orchestrator, so they
 must not move when the product API version changes.
@@ -118,22 +130,34 @@ observe-insurance-voice-ai/
 │   │   ├── services/            # business logic                    (Phase 2)
 │   │   ├── integrations/        # external-system adapters
 │   │   │   ├── base.py          #   HealthCheckable / DependencyStatus contracts
-│   │   │   └── registry.py      #   readiness probe registry
+│   │   │   ├── registry.py      #   readiness probe registry
+│   │   │   ├── repositories.py  #   CustomerRepository / ClaimsRepository contracts
+│   │   │   ├── factory.py       #   builds Integration #1 from settings
+│   │   │   └── sheets/          #   Google Sheets adapters
+│   │   │       ├── client.py    #     REST transport; no domain knowledge
+│   │   │       ├── rows.py      #     row -> domain object, malformed-data policy
+│   │   │       ├── customers.py #     GoogleSheetsCustomerRepository
+│   │   │       └── claims.py    #     GoogleSheetsClaimsRepository
 │   │   ├── schemas/             # request/response models (process boundary)
-│   │   ├── models/enums.py      # controlled domain vocabularies
+│   │   ├── models/             # Customer, Claim, controlled vocabularies
 │   │   └── core/                # cross-cutting concerns
 │   │       ├── config.py        #   pydantic-settings; the only env reader
 │   │       ├── context.py       #   request/call id contextvars
 │   │       ├── logging.py       #   JSON + console formatters, redaction
 │   │       ├── middleware.py    #   correlation id + access log
 │   │       ├── errors.py        #   AppError hierarchy
+│   │       ├── phone.py         #   E.164 normalisation
+│   │       ├── retry.py         #   bounded retry, backoff with jitter
 │   │       └── exception_handlers.py
 │   ├── tests/
 │   ├── Dockerfile
 │   └── pyproject.toml
-├── docs/architecture.md
-├── knowledge/                   # FAQ content, kept out of the prompt (Phase 2)
-├── scripts/                     # demo/seed scripts                 (Phase 3)
+├── docs/
+│   ├── architecture.md
+│   ├── google-sheets-setup.md   # sheet schema + setup
+│   └── DEFERRED.md              # running ledger of deferred work
+├── knowledge/                   # FAQ content, kept out of the prompt (Phase 3)
+├── scripts/seed_data/           # demo customer + claim CSVs
 ├── docker-compose.yml
 └── .env.example
 ```
@@ -192,35 +216,95 @@ This is covered by tests.
 
 ---
 
+## Integration #1 — customer and claim data
+
+Business logic depends on two protocols in
+[`integrations/repositories.py`](backend/app/integrations/repositories.py), never
+on Google Sheets:
+
+```python
+class CustomerRepository(Protocol):
+    async def lookup_customer_by_phone(self, phone_number: str) -> CustomerLookupResult: ...
+    async def verify_customer(self, customer_id: str, verification_value: str) -> VerificationResult: ...
+
+class ClaimsRepository(Protocol):
+    async def get_claim_for_customer(self, customer_id: str) -> ClaimLookupResult: ...
+```
+
+Replacing the sheet with a real policy-administration API touches only
+`integrations/sheets/` — no service, tool or agent.
+
+**Outcomes are explicit, never inferred.** Each operation returns a structured
+result carrying an outcome rather than raising for expected conditions, because
+a phone call must not end when an upstream is slow:
+
+```
+CUSTOMER_FOUND · CUSTOMER_NOT_FOUND · INTEGRATION_ERROR
+```
+
+An integration failure is **never** reported as customer-not-found. A caller who
+does hold a policy must never be told we have no record of them because a
+spreadsheet was unreachable — that is the rule the whole module is arranged
+around, and it is asserted directly in the tests.
+
+A `FailureReason` sits underneath the outcome (`INVALID_PHONE_NUMBER`,
+`UPSTREAM_TIMEOUT`, `MALFORMED_DATA`, …) so the agent can say "I didn't catch
+that number" rather than "you have no account" — a materially different sentence
+to hear on a support line — without blurring the three outcomes.
+
+**Phone numbers are normalised on both sides of the match.** A caller says
+`555-010-1234`, the sheet holds `+1 555 010 1234`; both become `+15550101234`.
+
+**Failure handling.** Timeouts, 429s and 5xx are retried within a bounded budget
+with exponentially backed-off, jittered delays; 4xx is not retried, since it
+cannot succeed and only spends a live caller's patience. A malformed *row* is
+skipped and logged by position so one bad record cannot deny service to everyone
+else; a malformed *header* is an integration error, because a sheet we cannot
+read must not be mistaken for a sheet with no matching customer.
+
+See [docs/google-sheets-setup.md](docs/google-sheets-setup.md) for the schema,
+setup steps and the demo data behind each mandatory scenario.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-39 tests, all deterministic and offline. Every test builds the app from an
-explicit `Settings` object, so results never depend on the developer's `.env`.
-The `TestClient` is entered as a context manager, so application startup and
-shutdown run in every test.
+162 tests, all deterministic and offline — no Google credentials, no network.
+External calls are mocked at the HTTP transport, so the client's URL building,
+status handling, retry policy and JSON parsing all run for real and only the
+socket is fake. Every test builds the app from an explicit `Settings` object, so
+results never depend on the developer's `.env`.
 
-Current coverage: health and readiness (including a dependency whose probe
-raises), settings injection, correlation-id propagation and isolation, the error
-envelope and its non-leakage guarantees, configuration validation, and log
-shape/redaction.
+Covered: phone normalisation across the forms a caller actually says; the retry
+budget and its backoff schedule; successful and normalised lookup; customer not
+found; malformed rows, missing columns and short rows; timeouts and upstream
+failures never masquerading as not-found; successful and failed verification;
+claim lookup including documents-required and most-recently-updated selection;
+health and readiness; the error envelope and its non-leakage guarantees;
+configuration validation; and log shape and redaction.
 
 ---
 
 ## What is not built yet
 
-Phase 1 is foundation only. Deliberately **not** implemented:
+Phases 1–2 cover the foundation and the customer/claim data integration.
+Deliberately **not** implemented yet:
 
-- The claims conversation workflow, session state and authentication boundary
-- Agent, tool and service implementations (the packages exist and are empty)
-- Google Sheets integrations for customer/claim lookup and post-call records
-- FAQ knowledge base content
+- Session state and the authentication boundary that gates claim access
+- The six agent tools and the services behind them (`services/`, `tools/` exist
+  and are empty)
+- Agent prompts, turn handling, escalation and emergency routing
 - The voice platform webhook and any LLM orchestration
-- Escalation and emergency handling
-- Retry/backoff execution (the budget is configured; the helper is not written)
+- FAQ knowledge base content
+- Integration #2: post-call interaction persistence
+- Service-account auth for Sheets (an API key covers Phase 2's reads; writes
+  will need one)
 
-The full requirement set is in [CLAUDE.md](CLAUDE.md); the design intent behind
-the layering is in [docs/architecture.md](docs/architecture.md).
+Every deferral is tracked with a reason and a destination in
+[docs/DEFERRED.md](docs/DEFERRED.md). The full requirement set is in
+[CLAUDE.md](CLAUDE.md); the design intent behind the layering is in
+[docs/architecture.md](docs/architecture.md).

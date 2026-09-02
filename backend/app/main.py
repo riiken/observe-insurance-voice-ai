@@ -17,6 +17,7 @@ from app.core.config import Settings, get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging, event, get_logger
 from app.core.middleware import register_middleware
+from app.integrations.factory import build_data_integration
 from app.integrations.registry import clear_dependencies, registered_dependencies
 
 log = get_logger(__name__)
@@ -25,6 +26,11 @@ log = get_logger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings: Settings = app.state.settings
+
+    # Built here rather than at import time so nothing reaches the network
+    # until the process is actually starting.
+    app.state.data_integration = build_data_integration(settings)
+
     log.info(
         "app.started",
         extra=event(
@@ -36,7 +42,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        # Phase 3 closes integration clients here.
+        if app.state.data_integration is not None:
+            await app.state.data_integration.aclose()
         clear_dependencies()
         log.info("app.stopped")
 
@@ -57,6 +64,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None if settings.is_production else "/openapi.json",
     )
     app.state.settings = settings
+    app.state.data_integration = None
 
     register_middleware(app)
     register_exception_handlers(app)

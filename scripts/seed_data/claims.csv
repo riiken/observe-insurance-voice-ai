@@ -1,0 +1,7 @@
+claim_id,customer_id,status,required_documents,last_updated
+CLM-88401,CUST-1001,Under Review,,2026-08-28
+CLM-88402,CUST-1002,Documents Required,Police report; Repair estimate,2026-08-30
+CLM-88403,CUST-1003,Approved,,2026-08-19
+CLM-88404,CUST-1004,Submitted,,2026-09-01
+CLM-88405,CUST-1005,Rejected,,2026-07-22
+CLM-88406,CUST-1002,Approved,,2026-03-11

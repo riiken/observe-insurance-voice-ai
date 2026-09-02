@@ -1,8 +1,8 @@
 """Domain vocabulary shared across services, tools and integrations.
 
-These are controlled values the whole system agrees on. They live here in
-Phase 1 because the log/record shapes and the readiness contract already refer
-to them; the workflow that produces them arrives in Phase 2.
+These are controlled values the whole system agrees on: outcomes are compared
+as enum members, never as free text, so a typo cannot silently turn a failure
+into a success.
 """
 
 from __future__ import annotations
@@ -28,6 +28,28 @@ class CustomerLookupOutcome(StrEnum):
 
     CUSTOMER_FOUND = "CUSTOMER_FOUND"
     CUSTOMER_NOT_FOUND = "CUSTOMER_NOT_FOUND"
+    INTEGRATION_ERROR = "INTEGRATION_ERROR"
+
+
+class VerificationOutcome(StrEnum):
+    """Result of checking a caller's verification value.
+
+    `CUSTOMER_NOT_FOUND` and `INTEGRATION_ERROR` are kept separate from
+    `VERIFICATION_FAILED`: only the last one is the caller getting it wrong, and
+    only that one should count against their retry budget.
+    """
+
+    VERIFIED = "VERIFIED"
+    VERIFICATION_FAILED = "VERIFICATION_FAILED"
+    CUSTOMER_NOT_FOUND = "CUSTOMER_NOT_FOUND"
+    INTEGRATION_ERROR = "INTEGRATION_ERROR"
+
+
+class ClaimLookupOutcome(StrEnum):
+    """As with customers, a missing claim is never an upstream failure."""
+
+    CLAIM_FOUND = "CLAIM_FOUND"
+    CLAIM_NOT_FOUND = "CLAIM_NOT_FOUND"
     INTEGRATION_ERROR = "INTEGRATION_ERROR"
 
 
