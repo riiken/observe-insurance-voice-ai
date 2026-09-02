@@ -23,11 +23,14 @@ if it finds one — see `safety_interceptor.py`.
 
 from __future__ import annotations
 
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.core import events
 from app.core.logging import event, get_logger
+from app.core.metrics import METRICS, TOOL_CALLS, TOOL_LATENCY
 from app.tools.base import ToolOutcome, ToolResult
 
 log = get_logger(__name__)
@@ -104,6 +107,7 @@ class ToolRegistry:
         """
         definition = self._definitions.get(name)
         if definition is None:
+            METRICS.increment(TOOL_CALLS, tool="unknown", outcome="UNKNOWN_TOOL")
             log.warning("tool.unknown", extra=event(tool=name, call_id=call_id))
             return _unavailable(call_id, reason="UNKNOWN_TOOL")
 
@@ -138,13 +142,20 @@ class ToolRegistry:
             )
             return _unavailable(call_id, reason="MISSING_ARGUMENTS")
 
+        started = time.perf_counter()
         try:
-            return await definition.handler(call_id=call_id, **supplied)
+            result = await definition.handler(call_id=call_id, **supplied)
         except Exception:
             # A tool that raises is a bug on our side; the caller hears an
             # apology rather than silence, and the traceback goes to the log.
-            log.exception("tool.error", extra=event(tool=name, call_id=call_id))
+            METRICS.increment(TOOL_CALLS, tool=name, outcome="EXCEPTION")
+            log.exception(events.TOOL_ERROR, extra=event(tool=name, call_id=call_id))
             return _unavailable(call_id, reason="TOOL_FAILED")
+
+        duration_ms = (time.perf_counter() - started) * 1000
+        METRICS.observe(TOOL_LATENCY, duration_ms, tool=name)
+        METRICS.increment(TOOL_CALLS, tool=name, outcome=str(result.outcome))
+        return result
 
 
 def _unavailable(call_id: str, *, reason: str) -> ToolResult:

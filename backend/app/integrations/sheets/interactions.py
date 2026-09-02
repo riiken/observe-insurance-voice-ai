@@ -12,9 +12,12 @@ event, and a duplicate row would corrupt any reporting built on this sheet.
 from __future__ import annotations
 
 import time
+from collections import OrderedDict
 
+from app.core import events
 from app.core.errors import IntegrationError
 from app.core.logging import event, get_logger
+from app.core.metrics import METRICS, POSTCALL_LATENCY
 from app.integrations.base import DependencyStatus
 from app.integrations.repositories import PersistResult
 from app.integrations.sheets.client import GoogleSheetsClient
@@ -30,19 +33,30 @@ class GoogleSheetsInteractionRepository:
 
     name = "interactions"
 
-    def __init__(self, client: GoogleSheetsClient, *, cell_range: str = "Interactions!A:L") -> None:
+    def __init__(
+        self,
+        client: GoogleSheetsClient,
+        *,
+        cell_range: str = "Interactions!A:L",
+        recorded_limit: int = 10_000,
+    ) -> None:
         self._client = client
         self._cell_range = cell_range
         # In-process guard. The sheet is still checked, but this catches the
         # common case — a retry arriving seconds later — without a round trip,
         # and closes the window between our read and our write within a process.
-        self._recorded: set[str] = set()
+        #
+        # Bounded: an unbounded set grows for the lifetime of the process. It is
+        # a hint, not the source of truth — evicting an old call id costs one
+        # extra read, and the sheet still prevents the duplicate.
+        self._recorded: OrderedDict[str, None] = OrderedDict()
+        self._recorded_limit = recorded_limit
 
     async def save(self, record: InteractionRecord) -> PersistResult:
         """Append the record unless this call is already on file."""
         if record.call_id in self._recorded:
             log.info(
-                "postcall.duplicate",
+                events.POSTCALL_DUPLICATE,
                 extra=event(call_id=record.call_id, source="memory"),
             )
             return PersistResult.already_recorded()
@@ -51,9 +65,9 @@ class GoogleSheetsInteractionRepository:
 
         try:
             if await self._already_recorded(record.call_id):
-                self._recorded.add(record.call_id)
+                self._remember(record.call_id)
                 log.info(
-                    "postcall.duplicate",
+                    events.POSTCALL_DUPLICATE,
                     extra=event(call_id=record.call_id, source="sheet"),
                 )
                 return PersistResult.already_recorded()
@@ -61,16 +75,17 @@ class GoogleSheetsInteractionRepository:
             await self._client.append_values(self._cell_range, [record.as_row()])
         except IntegrationError as exc:
             log.error(
-                "postcall.failed",
+                events.POSTCALL_FAILED,
                 extra=event(call_id=record.call_id, error_code=exc.code, success=False),
             )
             return PersistResult.integration_error(failure_reason(exc))
 
         # Marked only after the write is confirmed, so a failed attempt can be
         # retried rather than being mistaken for a duplicate.
-        self._recorded.add(record.call_id)
+        self._remember(record.call_id)
+        METRICS.observe(POSTCALL_LATENCY, (time.perf_counter() - started) * 1000)
         log.info(
-            "postcall.persisted",
+            events.POSTCALL_PERSISTED,
             extra=event(
                 call_id=record.call_id,
                 sentiment=record.sentiment,
@@ -79,6 +94,12 @@ class GoogleSheetsInteractionRepository:
             ),
         )
         return PersistResult.persisted()
+
+    def _remember(self, call_id: str) -> None:
+        """Note a filed call, evicting the oldest once the cache is full."""
+        self._recorded[call_id] = None
+        while len(self._recorded) > self._recorded_limit:
+            self._recorded.popitem(last=False)
 
     async def _already_recorded(self, call_id: str) -> bool:
         """Is this call already on the sheet?

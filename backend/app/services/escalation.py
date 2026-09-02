@@ -18,10 +18,13 @@ written down. The session's `claim_id` is deliberately not copied across.
 from __future__ import annotations
 
 import uuid
+from collections import deque
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 
+from app.core import events
 from app.core.logging import event, get_logger
+from app.core.metrics import ESCALATIONS, METRICS
 from app.models.enums import EscalationReason, EscalationStatus
 from app.models.session import SessionState
 from app.services.session_store import SessionStore
@@ -64,10 +67,20 @@ class EscalationService:
     a transfer that did not happen.
     """
 
-    def __init__(self, sessions: SessionStore, *, transfer_available: bool = False) -> None:
+    def __init__(
+        self,
+        sessions: SessionStore,
+        *,
+        transfer_available: bool = False,
+        history_limit: int = 1_000,
+    ) -> None:
         self._sessions = sessions
         self._transfer_available = transfer_available
-        self._records: list[EscalationRecord] = []
+        # Bounded: an unbounded list grows for the lifetime of the process and
+        # holds per-call data. These are a diagnostic convenience — every
+        # escalation is logged, and the durable record is the interaction log —
+        # so dropping the oldest costs nothing that matters.
+        self._records: deque[EscalationRecord] = deque(maxlen=history_limit)
 
     @property
     def transfer_available(self) -> bool:
@@ -107,9 +120,10 @@ class EscalationService:
         await self._sessions.save(session.with_escalation(str(reason)))
 
         # An emergency is logged at a level that will page someone.
+        METRICS.increment(ESCALATIONS, reason=str(reason))
         emit = log.error if record.is_emergency else log.info
         emit(
-            "escalation.requested",
+            events.ESCALATION_REQUESTED,
             extra=event(
                 escalation_id=record.escalation_id,
                 call_id=call_id,

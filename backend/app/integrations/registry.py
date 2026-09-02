@@ -22,6 +22,7 @@ _dependencies: list[HealthCheckable] = []
 
 def register_dependency(dependency: HealthCheckable) -> None:
     _dependencies.append(dependency)
+    clear_readiness_cache()
 
 
 def registered_dependencies() -> tuple[HealthCheckable, ...]:
@@ -31,6 +32,7 @@ def registered_dependencies() -> tuple[HealthCheckable, ...]:
 def clear_dependencies() -> None:
     """Test hook; also used when the app is torn down."""
     _dependencies.clear()
+    clear_readiness_cache()
 
 
 async def _probe(dependency: HealthCheckable) -> DependencyStatus:
@@ -59,3 +61,41 @@ async def check_all() -> list[DependencyStatus]:
     if not _dependencies:
         return []
     return list(await asyncio.gather(*(_probe(dep) for dep in _dependencies)))
+
+
+# Readiness is polled by orchestrators every few seconds, and each probe reads
+# every sheet. Unthrottled, a couple of replicas plus a load balancer generate
+# more Sheets traffic than the actual callers do — and can exhaust the quota
+# that real calls need. A few seconds of staleness is a fair trade.
+_cache: tuple[float, list[DependencyStatus]] | None = None
+_cache_lock = asyncio.Lock()
+
+
+async def cached_check_all(ttl_seconds: float) -> list[DependencyStatus]:
+    """`check_all`, but at most once per `ttl_seconds`."""
+    global _cache
+
+    if ttl_seconds <= 0:
+        return await check_all()
+
+    now = time.monotonic()
+    cached = _cache
+    if cached is not None and now - cached[0] < ttl_seconds:
+        return cached[1]
+
+    async with _cache_lock:
+        # Another prober may have refreshed while we queued.
+        cached = _cache
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < ttl_seconds:
+            return cached[1]
+
+        statuses = await check_all()
+        _cache = (now, statuses)
+        return statuses
+
+
+def clear_readiness_cache() -> None:
+    """Test hook, and called when dependencies change."""
+    global _cache
+    _cache = None

@@ -48,7 +48,7 @@ async def voice_webhook(
     would let an unauthenticated caller learn whether the integration is
     configured, by telling 503 apart from 401.
     """
-    if not verify_secret(x_vapi_secret, settings.voice_platform_api_key):
+    if not verify_secret(x_vapi_secret, settings.secret(settings.voice_platform_api_key)):
         # Deliberately terse: an unauthenticated caller learns nothing about
         # what a valid request looks like.
         log.warning("voice.webhook_rejected", extra=event(platform=PLATFORM_NAME))
@@ -74,8 +74,10 @@ async def voice_webhook(
         "voice.webhook",
         extra=event(
             platform=PLATFORM_NAME,
-            type=voice_event.raw_type,
-            event=voice_event.event_type,
+            platform_type=voice_event.raw_type,
+            # NOT `event`: that key is the log record's own name, and would
+            # overwrite "voice.webhook" with the payload's type.
+            event_kind=voice_event.event_type,
             call_id=voice_event.call_id or None,
             tool_calls=len(voice_event.tool_calls),
         ),

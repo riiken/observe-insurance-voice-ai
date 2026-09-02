@@ -7,9 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: Phase 10 complete — failure handling hardened.**
-> Every external boundary is deliberately broken under test, and the
-> [failure matrix](docs/FAILURE-MATRIX.md) is generated from code so it cannot
+> **Status: Phase 11 complete — observability and production hardening.**
+> Structured events, operational metrics, a
+> [security review](docs/SECURITY-REVIEW.md), and a
+> [failure matrix](docs/FAILURE-MATRIX.md) generated from code so it cannot
 > drift. Every CLAUDE.md requirement is checked off with evidence in
 > [docs/REQUIREMENTS-CHECKLIST.md](docs/REQUIREMENTS-CHECKLIST.md).
 > See [What is not built yet](#what-is-not-built-yet).
@@ -101,6 +102,7 @@ and copied into a clean `python:3.13-slim` runtime that runs as a non-root user.
 | GET    | `/ready`        | Readiness. Probes registered dependencies; 503 if any is unhealthy. |
 | POST   | `/api/v1/voice/webhook` | Every voice-platform event: call start, tool calls, completion. Requires the `x-vapi-secret` header. |
 | GET    | `/api/v1/voice/assistant-config` | The prompt and tool schemas to configure the assistant with, generated from the code that implements them. |
+| GET    | `/metrics`      | Counters, latencies and derived rates for this process. No identifiers, no secrets — but operational information, so keep it on an internal network. |
 | GET    | `/docs`         | OpenAPI UI. Disabled when `ENVIRONMENT` is `staging`/`prod`. |
 
 Once Sheets is configured, `/ready` probes both repositories and returns 503 if
@@ -175,6 +177,8 @@ observe-insurance-voice-ai/
 │   │       ├── middleware.py    #   correlation id + access log
 │   │       ├── errors.py        #   AppError hierarchy
 │   │       ├── failures.py      #   the failure catalogue
+│   │       ├── events.py        #   event-name constants
+│   │       ├── metrics.py       #   in-process counters and latencies
 │   │       ├── phone.py         #   E.164 normalisation
 │   │       ├── retry.py         #   bounded retry, backoff with jitter
 │   │       └── exception_handlers.py
@@ -187,6 +191,7 @@ observe-insurance-voice-ai/
 │   ├── vapi-setup.md            # configuring the voice assistant
 │   ├── REQUIREMENTS-CHECKLIST.md # every CLAUDE.md requirement, with evidence
 │   ├── FAILURE-MATRIX.md        # generated from code; do not hand-edit
+│   ├── SECURITY-REVIEW.md       # secrets, logs, boundaries, injection, PII
 │   └── DEFERRED.md              # running ledger of deferred work
 ├── knowledge/
 │   ├── claim_guidance.json      # next steps + submission instructions
@@ -760,13 +765,76 @@ refused them, since every authorization refusal is worded identically.
 
 ---
 
+## Observability
+
+**Events.** Names live in [`core/events.py`](backend/app/core/events.py) as
+constants, because a log query is only as good as the consistency of the name it
+filters on, and a typo in a log line is silent. Operations worth timing emit a
+`.started` / `.completed` pair, and every `.completed` carries `success` and
+`duration_ms` — so one query answers both "how often" and "how slow".
+
+Every domain event carries `call_id`, bound in a contextvar for the whole
+webhook event. One filter reconstructs a call:
+
+```bash
+docker compose logs api | jq 'select(.call_id == "<call id>")'
+```
+
+**Metrics** at `/metrics`: call duration, tool latency and outcomes,
+authentication success rate, escalation rate, post-call persistence rate.
+
+Deliberately **not** Prometheus or OpenTelemetry — those are right once there is
+somewhere to send the data; here they would add a dependency and a sidecar to a
+service that has neither. The shape is the same, so swapping the collector later
+touches one file.
+
+Metrics are process-local and reset on restart. That is acceptable for
+aggregates in a way it would not be for session state: losing a counter costs a
+gap in a graph, while losing a session would drop a caller mid-verification.
+Nothing in the registry is per-call, so it cannot leak PII and does not grow
+with volume — asserted.
+
+---
+
+## Scaling
+
+**What is already stateless.** Every request carries its own `call_id`; there
+are no cross-call singletons; both integrations are HTTP; sessions are keyed and
+isolated, so one caller's state is unreachable from another's.
+
+**What is not.** Sessions live in process memory. Two replicas behind a load
+balancer would split one call's turns across them, and the second turn would not
+find the session.
+
+**To scale horizontally, in order of effort:**
+
+1. **Session affinity.** Most voice platforms let you pin a call to one backend;
+   Vapi's server URL can carry one. Zero new infrastructure, and enough for
+   several replicas.
+2. **Swap the session store.** `SessionStore` is a protocol with one in-memory
+   implementation. A Redis one is roughly forty lines and changes nothing else
+   — the point of the interface. Do this when affinity stops being enough.
+3. **Move idempotency with it.** The post-call duplicate guard is a
+   process-local cache in front of the sheet. Under multiple replicas the sheet
+   still prevents duplicates, but a shared key store closes the race
+   ([DEFERRED](docs/DEFERRED.md) 8.1).
+4. **Ship metrics somewhere.** Per-process counters stop being readable across
+   replicas.
+
+**Deliberately not added:** Redis, Kafka, Kubernetes. None has a concrete need
+at one process, and CLAUDE.md §23 is explicit that unnecessary distributed
+infrastructure is a cost, not a credential. The seams are in place so each can
+be added the day it is justified.
+
+---
+
 ## Testing
 
 ```bash
 pytest backend/tests
 ```
 
-790 tests, all deterministic and offline — no Google credentials, no network.
+812 tests, all deterministic and offline — no Google credentials, no network.
 External calls are mocked at the HTTP transport, so the client's URL building,
 status handling, retry policy and JSON parsing all run for real and only the
 socket is fake. Every test builds the app from an explicit `Settings` object, so

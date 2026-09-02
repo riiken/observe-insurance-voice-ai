@@ -24,10 +24,18 @@ Two distinctions this module exists to preserve:
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from enum import StrEnum
 
+from app.core import events
 from app.core.logging import event, get_logger
+from app.core.metrics import (
+    AUTHENTICATION_ATTEMPTS,
+    CUSTOMER_LOOKUP_LATENCY,
+    CUSTOMER_LOOKUPS,
+    METRICS,
+)
 from app.integrations.repositories import (
     CustomerLookupResult,
     CustomerRepository,
@@ -101,7 +109,7 @@ class AuthenticationService:
 
         session = SessionState(call_id=call_id, caller_phone=caller_phone)
         await self._sessions.save(session)
-        log.info("call.started", extra=event(call_id=call_id))
+        log.info(events.CALL_STARTED, extra=event(call_id=call_id))
         return session
 
     # --- collect phone -> lookup customer ---------------------------------
@@ -116,12 +124,19 @@ class AuthenticationService:
         if session.authentication_status is AuthenticationStatus.AUTHENTICATION_FAILED:
             return self._result(AuthenticationStep.ATTEMPTS_EXHAUSTED, session)
 
+        log.info(events.CUSTOMER_LOOKUP_STARTED, extra=event(call_id=call_id))
+        started = time.perf_counter()
+
         result = await self._customers.lookup_customer_by_phone(spoken_phone)
+        duration_ms = round((time.perf_counter() - started) * 1000, 2)
+        METRICS.observe(CUSTOMER_LOOKUP_LATENCY, duration_ms)
 
         if result.is_integration_error:
             # Our problem, not the caller's: nothing is counted against them and
             # they are certainly not told we have no record of them.
-            log.warning("tool.error", extra=event(call_id=call_id, operation="lookup_customer"))
+            log.warning(
+                events.TOOL_ERROR, extra=event(call_id=call_id, operation="lookup_customer")
+            )
             return await self._save(self._result(AuthenticationStep.INTEGRATION_ERROR, session))
 
         # Every readable attempt is counted, so a caller reading numbers we
@@ -132,7 +147,16 @@ class AuthenticationService:
 
         if result.is_found and result.customer is not None:
             session = session.with_customer_found(result.customer)
-            log.info("customer.lookup", extra=event(**session.log_fields()))
+            METRICS.increment(CUSTOMER_LOOKUPS, outcome="CUSTOMER_FOUND")
+            log.info(
+                events.CUSTOMER_LOOKUP_COMPLETED,
+                extra=event(
+                    **session.log_fields(),
+                    outcome="CUSTOMER_FOUND",
+                    success=True,
+                    duration_ms=duration_ms,
+                ),
+            )
             return await self._save(
                 self._result(
                     AuthenticationStep.VERIFICATION_REQUIRED,
@@ -147,13 +171,19 @@ class AuthenticationService:
         if step is not AuthenticationStep.PHONE_NOT_UNDERSTOOD:
             session = session.with_customer_not_found()
 
+        METRICS.increment(CUSTOMER_LOOKUPS, outcome=str(result.outcome))
         log.info(
-            "customer.lookup",
+            events.CUSTOMER_LOOKUP_COMPLETED,
             extra=event(
                 call_id=call_id,
                 outcome=result.outcome,
                 step=step,
                 lookup_attempts=session.lookup_attempts,
+                success=not result.is_integration_error,
+                duration_ms=duration_ms,
+                # Redacted by the formatter. Worth having on the failing path:
+                # "which number did not match" is the first thing anyone asks.
+                caller_phone=session.caller_phone,
             ),
         )
         return await self._save(self._result(step, session))
@@ -186,7 +216,9 @@ class AuthenticationService:
         if result.outcome is VerificationOutcome.INTEGRATION_ERROR:
             # An unreachable upstream must not spend the caller's budget.
             session = session.with_verification_abandoned()
-            log.warning("tool.error", extra=event(call_id=call_id, operation="verify_customer"))
+            log.warning(
+                events.TOOL_ERROR, extra=event(call_id=call_id, operation="verify_customer")
+            )
             return await self._save(self._result(AuthenticationStep.INTEGRATION_ERROR, session))
 
         if result.outcome is VerificationOutcome.CUSTOMER_NOT_FOUND:
@@ -196,7 +228,8 @@ class AuthenticationService:
 
         if result.is_verified and result.customer is not None:
             session = session.with_authenticated(result.customer)
-            log.info("authentication.success", extra=event(**session.log_fields()))
+            METRICS.increment(AUTHENTICATION_ATTEMPTS, outcome="success")
+            log.info(events.AUTHENTICATION_SUCCESS, extra=event(**session.log_fields()))
             return await self._save(
                 self._result(
                     AuthenticationStep.AUTHENTICATED,
@@ -207,8 +240,9 @@ class AuthenticationService:
 
         session = session.with_verification_failed()
         exhausted = session.authentication_status is AuthenticationStatus.AUTHENTICATION_FAILED
+        METRICS.increment(AUTHENTICATION_ATTEMPTS, outcome="failure")
         log.warning(
-            "authentication.failed",
+            events.AUTHENTICATION_FAILED,
             extra=event(**session.log_fields(), exhausted=exhausted),
         )
         return await self._save(
@@ -231,15 +265,20 @@ class AuthenticationService:
         session = await self._require_session(call_id)
         session = session.with_escalation(reason)
         await self._sessions.save(session)
-        log.info("escalation.requested", extra=event(**session.log_fields(), reason=reason))
+        log.info(events.ESCALATION_REQUESTED, extra=event(**session.log_fields(), reason=reason))
         return session
 
     async def complete(self, call_id: str, outcome: ConversationOutcome) -> SessionState:
-        """Record how the call ended. Post-call persistence lands in Phase 5."""
+        """Record how the call ended.
+
+        Deliberately silent: `ConversationService` owns the call lifecycle and
+        emits `call.completed` with the duration. Two emitters of one event name
+        means two shapes of the same record, and a dashboard that quietly
+        double-counts.
+        """
         session = await self._require_session(call_id)
         session = session.with_outcome(outcome)
         await self._sessions.save(session)
-        log.info("call.completed", extra=event(**session.log_fields(), outcome=outcome))
         return session
 
     # --- helpers ----------------------------------------------------------

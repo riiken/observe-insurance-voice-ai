@@ -97,6 +97,15 @@ was not deferred — it was missed.
 | 10.3 | **The turn budget is not enforced across a whole tool call**, only within one client's retry loop. A tool making two sequential reads could take twice the budget. | No current tool does, and enforcing it end-to-end means threading a deadline through every layer. Worth doing if a tool ever needs two round trips. | If a tool needs two calls |
 | 10.4 | **`INCOMPLETE_CLAIM_DATA` and similar data problems are logged but not reported anywhere a claims operator would look.** | The log carries the sheet row; surfacing it needs a dashboard or a digest, which is 6.3's problem restated. | Deployment |
 
+### From Phase 11 — observability and hardening
+
+| # | Item | Why deferred | Lands in |
+| - | ---- | ------------ | -------- |
+| 11.1 | **Metrics are process-local with no exporter.** `/metrics` returns JSON, not Prometheus text, and nothing scrapes it. | A Prometheus client and a sidecar is infrastructure for a service that has nowhere to send data. The registry has the same shape — counters and latencies with labels — so swapping the collector touches one file. | Deployment |
+| 11.2 | **No latency percentiles.** Mean, min and max only. | A p95 needs retained samples: an unbounded buffer or a sketch. Neither is worth it when the numbers are read by a person during a demo. | With a real backend |
+| 11.3 | **No distributed tracing.** `call_id` and `request_id` correlate logs within one process; there is no span propagation to Vapi or Sheets. | Two hops and one process. Tracing earns its keep at more services than this has. | If the service is split |
+| 11.4 | **`/metrics` is unauthenticated.** It holds no identifiers or secrets, but it does reveal call volumes and failure rates. | Metrics endpoints are normally protected by network policy rather than application auth, which is where this belongs. Documented so a deployment does not expose it publicly. | Deployment |
+
 ---
 
 ## Closed

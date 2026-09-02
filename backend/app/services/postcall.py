@@ -15,7 +15,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from app.core import events
 from app.core.logging import event, get_logger
+from app.core.metrics import METRICS, POSTCALL
 from app.integrations.repositories import (
     InteractionRepository,
     PersistOutcome,
@@ -75,6 +77,7 @@ class PostCallService:
         record = self.build_record(session)
 
         if self._interactions is None:
+            METRICS.increment(POSTCALL, outcome="not_configured")
             log.warning(
                 "postcall.not_configured",
                 extra=event(call_id=record.call_id, sentiment=record.sentiment),
@@ -86,10 +89,24 @@ class PostCallService:
         except Exception:
             # The repository is contracted not to raise. If it does anyway,
             # that is a bug — and still not a reason to fail the webhook.
-            log.exception("postcall.failed", extra=event(call_id=record.call_id))
+            METRICS.increment(POSTCALL, outcome="failed")
+            log.exception(events.POSTCALL_FAILED, extra=event(call_id=record.call_id))
             return PostCallResult(PersistResult(PersistOutcome.INTEGRATION_ERROR), record)
 
         if result.is_duplicate:
-            log.info("postcall.duplicate", extra=event(call_id=record.call_id))
+            METRICS.increment(POSTCALL, outcome="duplicate")
+            log.info(events.POSTCALL_DUPLICATE, extra=event(call_id=record.call_id))
+        elif result.is_persisted:
+            METRICS.increment(POSTCALL, outcome="persisted")
+            log.info(
+                events.POSTCALL_PERSISTED,
+                extra=event(call_id=record.call_id, sentiment=record.sentiment),
+            )
+        else:
+            METRICS.increment(POSTCALL, outcome="failed")
+            log.error(
+                events.POSTCALL_FAILED,
+                extra=event(call_id=record.call_id, reason=str(result.reason)),
+            )
 
         return PostCallResult(result, record)

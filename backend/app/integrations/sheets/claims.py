@@ -5,8 +5,10 @@ from __future__ import annotations
 import time
 from datetime import date
 
+from app.core import events
 from app.core.errors import IntegrationError
 from app.core.logging import event, get_logger
+from app.core.metrics import CLAIM_LOOKUPS, METRICS
 from app.integrations.base import DependencyStatus
 from app.integrations.repositories import ClaimLookupResult
 from app.integrations.sheets.client import GoogleSheetsClient
@@ -34,8 +36,9 @@ class GoogleSheetsClaimsRepository:
         try:
             claims = await self._load_rows()
         except IntegrationError as exc:
+            METRICS.increment(CLAIM_LOOKUPS, outcome="INTEGRATION_ERROR")
             log.error(
-                "claim.lookup",
+                events.CLAIM_LOOKUP,
                 extra=event(
                     outcome="INTEGRATION_ERROR",
                     error_code=exc.code,
@@ -49,17 +52,22 @@ class GoogleSheetsClaimsRepository:
         duration_ms = round((time.perf_counter() - started) * 1000, 2)
 
         if not matches:
+            METRICS.increment(CLAIM_LOOKUPS, outcome="CLAIM_NOT_FOUND")
             log.info(
-                "claim.lookup",
+                events.CLAIM_LOOKUP,
                 extra=event(
-                    outcome="CLAIM_NOT_FOUND", customer_id=customer_id, duration_ms=duration_ms
+                    outcome="CLAIM_NOT_FOUND",
+                    customer_id=customer_id,
+                    duration_ms=duration_ms,
+                    success=True,
                 ),
             )
             return ClaimLookupResult.not_found()
 
         claim = _most_recent(matches)
+        METRICS.increment(CLAIM_LOOKUPS, outcome="CLAIM_FOUND")
         log.info(
-            "claim.lookup",
+            events.CLAIM_LOOKUP,
             extra=event(
                 outcome="CLAIM_FOUND",
                 customer_id=customer_id,

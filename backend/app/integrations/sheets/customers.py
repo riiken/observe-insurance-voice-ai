@@ -5,6 +5,7 @@ from __future__ import annotations
 import hmac
 import time
 
+from app.core import events
 from app.core.errors import IntegrationError
 from app.core.logging import event, get_logger
 from app.core.phone import normalize_phone
@@ -54,11 +55,17 @@ class GoogleSheetsCustomerRepository:
             # Nothing was wrong upstream and nothing is missing from the sheet;
             # we simply were not given a phone number.
             log.info(
-                "customer.lookup",
-                extra=event(outcome="CUSTOMER_NOT_FOUND", reason="INVALID_PHONE_NUMBER"),
+                events.CUSTOMER_LOOKUP_COMPLETED,
+                extra=event(
+                    outcome="CUSTOMER_NOT_FOUND",
+                    reason="INVALID_PHONE_NUMBER",
+                    success=False,
+                    duration_ms=0.0,
+                ),
             )
             return CustomerLookupResult.not_found(FailureReason.INVALID_PHONE_NUMBER)
 
+        log.info(events.CUSTOMER_LOOKUP_STARTED, extra=event(caller_phone=normalised))
         started = time.perf_counter()
         try:
             rows = await self._load_rows()
@@ -70,23 +77,25 @@ class GoogleSheetsCustomerRepository:
 
         if match is None:
             log.info(
-                "customer.lookup",
+                events.CUSTOMER_LOOKUP_COMPLETED,
                 extra=event(
                     outcome="CUSTOMER_NOT_FOUND",
                     reason="NO_MATCHING_RECORD",
                     caller_phone=normalised,
                     duration_ms=duration_ms,
+                    success=True,  # the lookup worked; the answer is "no record"
                 ),
             )
             return CustomerLookupResult.not_found()
 
         log.info(
-            "customer.lookup",
+            events.CUSTOMER_LOOKUP_COMPLETED,
             extra=event(
                 outcome="CUSTOMER_FOUND",
                 customer_id=match.customer_id,
                 caller_phone=normalised,
                 duration_ms=duration_ms,
+                success=True,
             ),
         )
         return CustomerLookupResult.found(match.to_customer())
@@ -97,7 +106,7 @@ class GoogleSheetsCustomerRepository:
         if not customer_id or not verification_value.strip():
             # An empty answer is a failed attempt, not a system fault.
             log.info(
-                "authentication.failed",
+                events.AUTHENTICATION_FAILED,
                 extra=event(customer_id=customer_id or None, reason="EMPTY_VALUE"),
             )
             return VerificationResult.failed()
@@ -109,17 +118,17 @@ class GoogleSheetsCustomerRepository:
 
         match = next((row for row in rows if row.customer_id == customer_id), None)
         if match is None:
-            log.warning("authentication.failed", extra=event(reason="CUSTOMER_NOT_FOUND"))
+            log.warning(events.AUTHENTICATION_FAILED, extra=event(reason="CUSTOMER_NOT_FOUND"))
             return VerificationResult.customer_not_found()
 
         if not _values_match(match.verification_value, verification_value):
             log.info(
-                "authentication.failed",
+                events.AUTHENTICATION_FAILED,
                 extra=event(customer_id=customer_id, reason="VALUE_MISMATCH"),
             )
             return VerificationResult.failed()
 
-        log.info("authentication.success", extra=event(customer_id=customer_id))
+        log.info(events.AUTHENTICATION_SUCCESS, extra=event(customer_id=customer_id))
         return VerificationResult.verified(match.to_customer())
 
     async def check_health(self) -> DependencyStatus:
@@ -170,7 +179,7 @@ class GoogleSheetsCustomerRepository:
     @staticmethod
     def _lookup_failure(exc: IntegrationError, *, phone: str) -> CustomerLookupResult:
         log.error(
-            "customer.lookup",
+            events.CUSTOMER_LOOKUP_COMPLETED,
             extra=event(
                 outcome="INTEGRATION_ERROR",
                 error_code=exc.code,

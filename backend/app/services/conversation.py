@@ -14,8 +14,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from app.core import events
 from app.core.context import reset_call_id, set_call_id
 from app.core.logging import event, get_logger
+from app.core.metrics import CALL_DURATION, CALLS_COMPLETED, CALLS_TOTAL, METRICS
 from app.integrations.voice_platform import VoiceEvent, VoiceEventType
 from app.models.enums import AuthenticationStatus, ConversationOutcome
 from app.models.session import SessionState
@@ -71,9 +73,12 @@ class ConversationService:
 
     async def _dispatch(self, voice_event: VoiceEvent) -> ConversationResponse:
         if voice_event.event_type is VoiceEventType.CALL_STARTED:
+            session = await self._sessions.get(voice_event.call_id)
             await self._authentication.start_call(
                 voice_event.call_id, caller_phone=voice_event.caller_phone
             )
+            if session is None:  # count a call once, not per redelivered event
+                METRICS.increment(CALLS_TOTAL)
             return ConversationResponse(voice_event.event_type, {})
 
         if voice_event.event_type is VoiceEventType.TOOL_CALLS:
@@ -99,7 +104,7 @@ class ConversationService:
 
         for invocation in voice_event.tool_calls:
             log.info(
-                "tool.invoked",
+                events.TOOL_INVOKED,
                 extra=event(tool=invocation.name, arguments=sorted(invocation.arguments)),
             )
             # call_id comes from the platform payload, never from the model.
@@ -110,7 +115,7 @@ class ConversationService:
             transfer_to = transfer_to or result.transfer_to
 
             log.info(
-                "tool.completed",
+                events.TOOL_COMPLETED,
                 extra=event(tool=invocation.name, outcome=result.outcome),
             )
 
@@ -125,17 +130,22 @@ class ConversationService:
         """
         session = await self._sessions.get(voice_event.call_id)
         if session is None:
-            log.info("call.completed", extra=event(outcome="UNKNOWN_SESSION"))
+            log.info(events.CALL_COMPLETED, extra=event(outcome="UNKNOWN_SESSION"))
             return
 
         outcome = _derive_outcome(session)
         session = await self._authentication.complete(voice_event.call_id, outcome)
 
+        duration_ms = (session.updated_at - session.started_at).total_seconds() * 1000
+        METRICS.increment(CALLS_COMPLETED, outcome=str(outcome))
+        METRICS.observe(CALL_DURATION, duration_ms)
+
         log.info(
-            "call.completed",
+            events.CALL_COMPLETED,
             extra=event(
                 **session.log_fields(),
                 outcome=outcome,
+                duration_ms=round(duration_ms, 2),
                 ended_reason=voice_event.ended_reason,
                 has_summary=voice_event.summary is not None,
             ),

@@ -53,6 +53,42 @@ exists so there is one obvious place for such a rule and it is not the prompt.
 This also makes the interesting parts testable without a phone call: services
 and tools are plain Python with mocked integrations.
 
+## Decisions taken in Phase 11
+
+**Event names are constants.** A log query is only as good as the consistency
+of the name it filters on, and a typo in a log line is silent. Anything
+alerting keys on lives in one module.
+
+**Metrics belong in the service layer, not the adapter.** Instrumenting
+`GoogleSheetsCustomerRepository` meant the authentication success rate existed
+only for the Sheets path — it vanished under any other backend, and under the
+test fakes. Business metrics moved to the services that make the decision;
+adapters keep only their own I/O latency.
+
+**One emitter per event name.** `call.completed` was being written by two
+layers with different fields, which double-counts on any dashboard. The
+conversation service owns the call lifecycle; the authentication service is
+silent.
+
+**Secrets are `SecretStr`.** Before, `repr(Settings)` printed the API key, the
+webhook secret and the service-account private key in full — one traceback
+frame away from a log store.
+
+**Metrics are global; sessions are not.** Both are process-local, and the
+distinction is deliberate: losing a counter costs a gap in a graph, while
+losing a session drops a caller mid-verification. Nothing in the registry is
+per-call, so it neither leaks PII nor grows with volume.
+
+**Readiness results are cached for a few seconds.** Orchestrators probe every
+few seconds and each probe reads every sheet; two replicas plus a load balancer
+generate more upstream traffic than the callers do, and can exhaust the quota
+real calls need.
+
+**Two in-process collections were bounded.** The escalation history and the
+post-call idempotency cache both grew for the life of the process. Both are
+hints — the durable records are the logs and the sheet — so evicting the oldest
+costs nothing that matters.
+
 ## Decisions taken in Phase 10
 
 **The failure matrix is data, not prose.** A hand-written matrix is out of date

@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 Environment = Literal["local", "dev", "staging", "prod"]
@@ -55,10 +55,19 @@ class Settings(BaseSettings):
     # the full attempt budget.
     postcall_timeout_seconds: float = Field(default=20.0, gt=0)
 
+    # How long a readiness result may be reused. Orchestrator probes are
+    # frequent and each one reads every sheet; a few seconds of staleness costs
+    # far less than the upstream quota an unthrottled probe loop consumes.
+    # Zero disables the cache.
+    readiness_cache_seconds: float = Field(default=5.0, ge=0)
+
     # --- Google Sheets (Integration #1: customer + claim retrieval) --------
     # An API key reads a link-shared sheet, which is all Phase 2 needs. Writes
     # (Integration #2) will need a service account; see docs/DEFERRED.md.
-    google_sheets_api_key: str | None = None
+    # SecretStr, not str: pydantic masks these in `repr`, so a traceback frame
+    # or an accidental log of the settings object prints "**********" rather
+    # than a live credential.
+    google_sheets_api_key: SecretStr | None = None
     google_sheets_spreadsheet_id: str | None = None
     google_sheets_base_url: str = "https://sheets.googleapis.com/v4/spreadsheets"
     sheets_customers_range: str = "Customers!A:D"
@@ -70,7 +79,7 @@ class Settings(BaseSettings):
     # so this is its own file with its own sharing.
     google_interactions_spreadsheet_id: str | None = None
     # The service account JSON key, as a single-line JSON string.
-    google_service_account_json: str | None = None
+    google_service_account_json: SecretStr | None = None
     sheets_interactions_range: str = "Interactions!A:L"
     # Override only to point at a stub during local testing.
     google_token_endpoint: str = "https://oauth2.googleapis.com/token"
@@ -94,7 +103,7 @@ class Settings(BaseSettings):
     # as the `x-vapi-secret` header). Unset in local development means the check
     # is skipped; a production environment refuses to start without it, because
     # an unauthenticated webhook is an open door to the tool layer.
-    voice_platform_api_key: str | None = None
+    voice_platform_api_key: SecretStr | None = None
 
     # Where a representative request hands the call. Unset means the platform
     # cannot transfer, and the realistic escalation workflow runs instead — the
@@ -121,7 +130,7 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def _require_webhook_secret_in_production(self) -> Settings:
-        if self.is_production and not self.voice_platform_api_key:
+        if self.is_production and not self.secret(self.voice_platform_api_key):
             raise ValueError(
                 "VOICE_PLATFORM_API_KEY is required when ENVIRONMENT is staging or prod: "
                 "an unauthenticated webhook would expose the tool layer."
@@ -131,6 +140,10 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment in ("staging", "prod")
+
+    def secret(self, value: SecretStr | None) -> str | None:
+        """Unwrap a secret at the one point it is actually used."""
+        return value.get_secret_value() if value is not None else None
 
     @property
     def interactions_configured(self) -> bool:

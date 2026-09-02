@@ -62,7 +62,7 @@ def build_data_integration(settings: Settings) -> DataIntegration | None:
     client = GoogleSheetsClient(
         # Narrowed by `sheets_configured`.
         spreadsheet_id=str(settings.google_sheets_spreadsheet_id),
-        authorizer=ApiKeyAuthorizer(str(settings.google_sheets_api_key)),
+        authorizer=ApiKeyAuthorizer(str(settings.secret(settings.google_sheets_api_key))),
         base_url=settings.google_sheets_base_url,
         timeout_seconds=settings.http_timeout_seconds,
         max_retries=settings.http_max_retries,
@@ -121,7 +121,7 @@ def _build_interactions(
         )
 
     try:
-        service_account = json.loads(str(settings.google_service_account_json))
+        service_account = json.loads(str(settings.secret(settings.google_service_account_json)))
         if not isinstance(service_account, dict):
             raise ValueError("service account JSON must be an object")
         authorizer = ServiceAccountAuthorizer(

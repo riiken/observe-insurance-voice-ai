@@ -17,7 +17,8 @@ from fastapi import APIRouter, Response, status
 
 from app import __version__
 from app.api.dependencies import SettingsDep
-from app.integrations.registry import check_all
+from app.core.metrics import METRICS
+from app.integrations.registry import cached_check_all
 from app.schemas.health import DependencyHealth, HealthResponse, ReadinessResponse
 
 router = APIRouter(tags=["health"])
@@ -34,7 +35,7 @@ async def health(settings: SettingsDep) -> HealthResponse:
 
 @router.get("/ready", response_model=ReadinessResponse, summary="Readiness probe")
 async def ready(settings: SettingsDep, response: Response) -> ReadinessResponse:
-    statuses = await check_all()
+    statuses = await cached_check_all(settings.readiness_cache_seconds)
     is_ready = all(dependency.healthy for dependency in statuses)
 
     if not is_ready:
@@ -47,3 +48,18 @@ async def ready(settings: SettingsDep, response: Response) -> ReadinessResponse:
         environment=settings.environment,
         dependencies=[DependencyHealth(**asdict(s)) for s in statuses],
     )
+
+
+@router.get("/metrics", summary="Operational metrics")
+async def metrics() -> dict[str, object]:
+    """Counters, latencies and the derived rates, for this process.
+
+    Contains no call ids, no customer data and no secrets — only counts and
+    durations — so it is safe to scrape. It is still operational information
+    (call volumes, failure rates), so a deployment should keep it on an
+    internal network rather than the public internet.
+
+    Process-local and reset by a restart. That is the honest limit of not
+    running a metrics backend; see the scaling notes in the README.
+    """
+    return METRICS.snapshot()
