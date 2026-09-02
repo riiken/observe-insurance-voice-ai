@@ -7,8 +7,10 @@ handling and post-call record keeping.
 The voice platform owns speech; this service owns the business logic,
 authorization boundary and external integrations.
 
-> **Status: core complete.** All 25 mandatory requirements verified —
-> see [docs/CORE-COMPLETE.md](docs/CORE-COMPLETE.md).
+> **Status: core complete and demonstrated live.** All 25 mandatory
+> requirements verified offline by 821 tests, then walked scenario by scenario
+> over a real voice call — see
+> [docs/CORE-COMPLETE.md](docs/CORE-COMPLETE.md#live-verification).
 > Structured events, operational metrics, a
 > [security review](docs/SECURITY-REVIEW.md), and a
 > [failure matrix](docs/FAILURE-MATRIX.md) generated from code so it cannot
@@ -870,8 +872,6 @@ base. Deliberately **not** implemented yet:
   log records that a call *was* escalated, but not the escalation record itself)
 - Transfer is implemented but unverified against a live Vapi account — no
   destination exists to transfer to
-- A live phone call has not been placed — the webhook is exercised end to end
-  over HTTP with real Vapi payload shapes, but the last hop is manual
 
 Every deferral is tracked with a reason and a destination in
 [docs/DEFERRED.md](docs/DEFERRED.md). The full requirement set is in

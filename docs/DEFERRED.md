@@ -45,7 +45,6 @@ was not deferred — it was missed.
 
 | # | Item | Why deferred | Lands in |
 | - | ---- | ------------ | -------- |
-| 5.1 | **No live call has been placed.** The webhook is exercised end to end over HTTP with real Vapi payload shapes, but nobody has dialled a phone number. | Needs a Vapi account, a public tunnel and a phone number — none of which belong in an automated test. `docs/vapi-setup.md` is written to be followed exactly once, then verified against the scenario table. | Manual verification |
 | 5.2 | **Transfer is implemented but unverified.** `VOICE_TRANSFER_PHONE_NUMBER` wires a Vapi destination through `voice_platform.py`, and the record becomes TRANSFERRING; but no live Vapi account and no destination exist to test it against. Unset, the realistic escalation workflow runs and is fully tested. | The wire format is written from Vapi's documented destination shape. Confirming it needs an account, a number, and a person to answer — none of which belong in an automated test. CLAUDE.md §13 explicitly accepts the escalation workflow where transfer is unavailable. | Manual verification |
 | 5.3 | **The webhook is not idempotent.** Vapi retries a failed delivery; a retried `verify_identity` would spend a second attempt. | The endpoint answers 200 on almost everything, so retries are rare in practice. Proper handling means deduplicating on the tool-call id, which is a small change but needs a store with a TTL. | Before production |
 | 5.4 | **FAQ matching is keyword overlap, not semantic.** | Revisited in Phase 6 and kept deliberately: for five documents, keyword matching is exact, instant, dependency-free and deterministic. The specific example that motivated this entry ("When can I reach you?") now matches — the fix was a keyword, not a model. Embeddings remain a bonus-scope idea, worth doing only once there is a measured recall gap. | Only with measured need |
@@ -120,6 +119,7 @@ was not deferred — it was missed.
 | 1.2 | The remaining four tools | Phase 5 — `lookup_customer`, `verify_identity`, `search_faq`, `request_representative`, behind a registry that is the whole attack surface |
 | 1.3 | Agent prompt, turn structure, emergency routing | Phase 5 — `app/agents/prompts/claims_agent.md`, carrying behaviour but no business rules |
 | 1.4 | Voice platform webhook and secret enforcement | Phase 5 — `POST /api/v1/voice/webhook`; production refuses to start without a secret |
+| 5.1 | Live voice call | Verified manually against a Vapi assistant over a public tunnel — every mandatory scenario walked by voice, with the backend's own telemetry as evidence. See [CORE-COMPLETE.md](CORE-COMPLETE.md#live-verification). |
 | 1.6 | Post-call interaction persistence (Integration #2) | Phase 8 — a dedicated sheet, service-account auth, `call_id` idempotency, and a record that cannot affect a caller |
 | 2.1 | Service-account auth for Google Sheets | Phase 8 — `ServiceAccountAuthorizer` signs a JWT assertion and exchanges it over our own httpx client; reads keep the API key |
 | 3.4 | `conversation_outcome` persisted | Phase 8 — it is the `resolution` column |

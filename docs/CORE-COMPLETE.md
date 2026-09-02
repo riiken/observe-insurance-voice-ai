@@ -72,16 +72,45 @@ on `app/`.
 
 ---
 
+## Live verification
+
+The gate above runs offline. Everything below was then confirmed by **talking to
+the assistant over a phone line** — a Vapi assistant on Claude Sonnet 5, reaching
+this backend through a public tunnel, reading real rows from Google Sheets.
+
+The evidence is the backend's own telemetry, taken from `/metrics` after the
+session:
+
+| Scenario | What the counters showed |
+| -------- | ------------------------ |
+| Happy path | `calls_completed{RESOLVED}`, `lookup_customer`/`verify_identity`/`get_claim_status` all SUCCESS |
+| Authentication failure | `verify_identity` INVALID_INPUT ×2 then EXHAUSTED, `escalations{AUTHENTICATION_FAILED}` |
+| Customer not found | `customer_lookups{CUSTOMER_NOT_FOUND}`, `escalations{CUSTOMER_NOT_FOUND}` — never an auth failure |
+| Representative escalation | `request_representative` SUCCESS, no verification demanded first |
+| Emergency | `escalations{EMERGENCY}` — and an ordinary "fire last month" claim did **not** trigger it |
+| FAQ | `search_faq` SUCCESS, answered without verification |
+| Post-call record | `postcall{persisted}` — rows written to a separate Interactions spreadsheet |
+
+Tool latency ran 410–740 ms, so the model was never waiting on the backend.
+
+Two things worth noting from the run:
+
+**Integration #2 uses a second spreadsheet, not a second tab.** It was
+initially pointed at the customer file, which the service warns about at
+startup (`integration.shared_spreadsheet`). The write credential is the only
+one in the system with write scope; on a shared file it could edit the
+`verification_value` column that authenticates callers. Separating the files
+closes that.
+
+**The assistant cannot end a call.** No hang-up tool is attached, deliberately:
+an agent that can terminate a call can terminate one during an emergency, and
+the emergency response asks the *caller* to hang up and dial 911. Vapi's
+silence timeout closes idle calls instead.
+
 ## Status
 
-**Core complete.** All 25 mandatory requirements implemented and verified; all
-four gates pass.
-
-The one thing that cannot be verified here is a **live phone call** — it needs a
-Vapi account, a public tunnel and a phone number. Everything up to that wire is
-exercised over real HTTP with real Vapi payload shapes;
-[vapi-setup.md](vapi-setup.md) is written to be followed once, with a scenario
-table to check against.
+**Core complete.** All 25 mandatory requirements implemented, verified offline
+by 821 tests and four gates, and demonstrated live by voice.
 
 Remaining limitations are recorded with their reasoning in
 [DEFERRED.md](DEFERRED.md) and summarised in

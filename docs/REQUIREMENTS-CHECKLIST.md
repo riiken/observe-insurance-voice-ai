@@ -233,7 +233,7 @@ Legend: **✅** done and tested · **⚠️** done with a stated limitation · *
 
 | | | |
 | --- | --- | --- |
-| A real voice call can be demonstrated | ⚠️ | **Not yet placed.** Everything up to the wire is verified over real HTTP with real Vapi payload shapes; the last hop needs a Vapi account, a tunnel and a phone number. [vapi-setup.md](vapi-setup.md) is written to be followed once. |
+| A real voice call can be demonstrated | ✅ | Verified by voice against a Vapi assistant over a public tunnel. Every mandatory scenario walked, with the backend's telemetry as evidence — see [CORE-COMPLETE.md](CORE-COMPLETE.md#live-verification). |
 | Customer lookup works | ✅ | |
 | Authentication works | ✅ | |
 | Claim lookup works | ✅ | |
@@ -252,8 +252,9 @@ Legend: **✅** done and tested · **⚠️** done with a stated limitation · *
 
 ## Honest summary
 
-**Not done:** a live phone call (§24), and multi-agent orchestration (§4, bonus,
-deliberately skipped).
+**Not done:** multi-agent orchestration (§4, bonus). §4 says bonuses come after
+everything else works, and a second agent would add coordination failure modes
+for no capability this assignment needs.
 
 **Done with a stated limitation:** `complete_call` is platform-driven rather
 than a model tool (§8); voice transfer is implemented but unverified (§13);
